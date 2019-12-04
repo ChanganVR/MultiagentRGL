@@ -10,6 +10,8 @@ from crowd_nav.utils.explorer import Explorer
 from crowd_nav.policy.policy_factory import policy_factory
 from crowd_sim.envs.utils.robot import Robot
 from crowd_sim.envs.policy.orca import ORCA
+from crowd_nav.utils.multiagent_explorer import MultiagentExplorer
+from crowd_sim.envs.multiagent_sim import MultiagentSim
 
 
 def main(args):
@@ -68,16 +70,11 @@ def main(args):
 
     # configure environment
     env_config = config.EnvConfig(args.debug)
-
-    if args.human_num is not None:
-        env_config.sim.human_num = args.human_num
-    if args.group_num is not None:
-        env_config.sim.group_num = args.group_num
-    if args.group_size is not None:
-        env_config.sim.group_size = args.group_size
-    env = gym.make('CrowdSim-v0')
-    env.configure(env_config)
-
+    robot = Robot(env_config, 'robot')
+    robot.time_step = env_config.env.time_step
+    robot.set_policy(policy)
+    env = MultiagentSim()
+    env.configure(env_config, robot)
     if args.square:
         env.test_scenario = 'square_crossing'
     if args.circle:
@@ -85,11 +82,7 @@ def main(args):
     if args.test_scenario is not None:
         env.test_scenario = args.test_scenario
 
-    robot = Robot(env_config, 'robot')
-    env.set_robot(robot)
-    robot.time_step = env.time_step
-    robot.set_policy(policy)
-    explorer = Explorer(env, robot, device, None, gamma=0.9)
+    explorer = MultiagentExplorer(env, robot, device, None, gamma=0.9)
 
     train_config = config.TrainConfig(args.debug)
     epsilon_end = train_config.train.epsilon_end
@@ -106,18 +99,18 @@ def main(args):
             robot.policy.safety_space = args.safety_space
         logging.info('ORCA agent buffer: %f', robot.policy.safety_space)
 
-    policy.set_env(env)
+    agents = env.agents
     robot.print_info()
 
     if args.visualize:
         rewards = []
-        ob = env.reset(args.phase, args.test_case)
+        obs = env.reset(args.phase, args.test_case)
         done = False
         last_pos = np.array(robot.get_position())
         while not done:
-            action = robot.act(ob)
-            ob, _, done, info = env.step(action)
-            rewards.append(_)
+            actions = [agent.act(ob) for agent, ob in zip(agents, obs)]
+            obs, reward, done, info = env.step(actions)
+            rewards.append(reward)
             current_pos = np.array(robot.get_position())
             logging.debug('Speed: %.2f', np.linalg.norm(current_pos - last_pos) / robot.time_step)
             last_pos = current_pos
@@ -151,8 +144,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('--config', type=str, default=None)
-    parser.add_argument('--policy', type=str, default='model_predictive_rl')
+    parser.add_argument('--config', type=str, default='configs/icra_benchmark/rgl.py')
+    parser.add_argument('--policy', type=str, default='rgl')
     parser.add_argument('-m', '--model_dir', type=str, default=None)
     parser.add_argument('--il', default=False, action='store_true')
     parser.add_argument('--rl', default=False, action='store_true')

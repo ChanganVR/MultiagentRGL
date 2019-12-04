@@ -60,12 +60,6 @@ def main(args):
         # with open(os.path.join(args.output_dir, 'config.py'), 'w') as fo:
         #     fo.write(config_text)
 
-    if args.save_scene:
-        save_scene_dir = os.path.join(args.output_dir, 'save_scene')
-        os.makedirs(save_scene_dir)
-    else:
-        save_scene_dir = None
-
     args.config = os.path.join(args.output_dir, 'config.py')
     log_file = os.path.join(args.output_dir, 'output.log')
     il_weight_file = os.path.join(args.output_dir, 'il_model.pth')
@@ -106,7 +100,6 @@ def main(args):
     robot = Robot(env_config, 'robot')
     robot.time_step = env.time_step
     env.set_robot(robot)
-    env.save_scene_dir = save_scene_dir
 
     # read training parameters
     train_config = config.TrainConfig(args.debug)
@@ -248,15 +241,14 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('--policy', type=str, default='model_predictive_rl')
-    parser.add_argument('--config', type=str, default='configs/icra_benchmark/mp_separate.py')
+    parser.add_argument('--policy', type=str, default='rgl')
+    parser.add_argument('--config', type=str, default='configs/icra_benchmark/rgl.py')
     parser.add_argument('--output_dir', type=str, default='data/output')
     parser.add_argument('--overwrite', default=False, action='store_true')
     parser.add_argument('--weights', type=str)
     parser.add_argument('--resume', default=False, action='store_true')
     parser.add_argument('--gpu', default=False, action='store_true')
     parser.add_argument('--debug', default=False, action='store_true')
-    parser.add_argument('--save_scene', default=False, action='store_true')
     parser.add_argument('--test_after_every_eval', default=False, action='store_true')
     parser.add_argument('--randomseed', type=int, default=17)
 
