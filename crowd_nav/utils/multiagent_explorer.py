@@ -6,10 +6,10 @@ from tqdm import tqdm
 from crowd_sim.envs.utils.info import *
 
 
-class Explorer(object):
+class MultiagentExplorer(object):
     def __init__(self, env, robot, device, writer, memory=None, gamma=None, target_policy=None):
         self.env = env
-        self.robot = robot
+        self.agents = env.agents
         self.device = device
         self.writer = writer
         self.memory = memory
@@ -17,10 +17,14 @@ class Explorer(object):
         self.target_policy = target_policy
         self.statistics = None
 
+        self.time_step = self.agents[0].time_step
+        self.v_pref = self.agents[0].v_pref
+
     # @profile
     def run_episodes(self, num_episode, phase, update_memory=False, imitation_learning=False, episode=None, epoch=None,
                      print_failure=False):
-        self.robot.policy.set_phase(phase)
+        for agent in self.agents:
+            agent.policy.set_phase(phase)
         success_times = []
         collision_times = []
         timeout_times = []
@@ -40,16 +44,15 @@ class Explorer(object):
             pbar = None
 
         for i in range(num_episode):
-            ob = self.env.reset(phase)
+            obs = self.env.reset(phase)
             done = False
-            states = []
-            actions = []
+            agent_states = [[] for _ in range(len(self.agents))]
             rewards = []
             while not done:
-                action = self.robot.act(ob)
-                ob, reward, done, info = self.env.step(action)
-                states.append(self.robot.policy.last_state)
-                actions.append(action)
+                actions = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
+                obs, reward, done, info = self.env.step(actions)
+                for k in range(len(self.agents)):
+                    agent_states[k].append(self.agents[k].last_state)
                 rewards.append(reward)
 
                 if isinstance(info, Discomfort):
@@ -73,13 +76,14 @@ class Explorer(object):
             if update_memory:
                 if isinstance(info, ReachGoal) or isinstance(info, Collision):
                     # only add positive(success) or negative(collision) experience in experience set
-                    self.update_memory(states, actions, rewards, imitation_learning)
+                    for k in range(len(self.agents)):
+                        self.update_memory(agent_states[k], rewards)
 
-            cumulative_rewards.append(sum([pow(self.gamma, t * self.robot.time_step * self.robot.v_pref)
+            cumulative_rewards.append(sum([pow(self.gamma, t * self.time_step * self.v_pref)
                                            * reward for t, reward in enumerate(rewards)]))
             returns = []
             for step in range(len(rewards)):
-                step_return = sum([pow(self.gamma, t * self.robot.time_step * self.robot.v_pref)
+                step_return = sum([pow(self.gamma, t * self.time_step * self.v_pref)
                                    * reward for t, reward in enumerate(rewards[step:])])
                 returns.append(step_return)
             average_returns.append(average(returns))
@@ -110,27 +114,18 @@ class Explorer(object):
 
         return self.statistics
 
-    def update_memory(self, states, actions, rewards, imitation_learning=False):
+    def update_memory(self, states, rewards):
         if self.memory is None or self.gamma is None:
             raise ValueError('Memory or gamma value is not set!')
         
         for i, state in enumerate(states[:-1]):
             reward = rewards[i]
-
-            # VALUE UPDATE
-            if imitation_learning:
-                # define the value of states in IL as cumulative discounted rewards, which is the same in RL
-                state = self.target_policy.transform(state)
-                next_state = self.target_policy.transform(states[i+1])
-                value = sum([pow(self.gamma, (t - i) * self.robot.time_step * self.robot.v_pref) * reward *
-                             (1 if t >= i else 0) for t, reward in enumerate(rewards)])
+            next_state = states[i+1]
+            if i == len(states) - 1:
+                # terminal state
+                value = reward
             else:
-                next_state = states[i+1]
-                if i == len(states) - 1:
-                    # terminal state
-                    value = reward
-                else:
-                    value = 0
+                value = 0
             value = torch.Tensor([value]).to(self.device)
             reward = torch.Tensor([rewards[i]]).to(self.device)
 

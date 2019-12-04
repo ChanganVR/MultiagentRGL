@@ -14,7 +14,9 @@ from crowd_sim.envs.utils.robot import Robot
 from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer
 from crowd_nav.utils.memory import ReplayMemory
 from crowd_nav.utils.explorer import Explorer
+from crowd_nav.utils.multiagent_explorer import MultiagentExplorer
 from crowd_nav.policy.policy_factory import policy_factory
+from crowd_sim.envs.multiagent_sim import MultiagentSim
 
 
 def set_random_seeds(seed):
@@ -159,7 +161,7 @@ def main(args):
         il_policy.multiagent_training = policy.multiagent_training
         il_policy.safety_space = safety_space
         robot.set_policy(il_policy)
-        explorer.run_k_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
+        explorer.run_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
         trainer.optimize_epoch(il_epochs)
         policy.save_model(il_weight_file)
         logging.info('Finish imitation learning. Weights saved.')
@@ -167,28 +169,35 @@ def main(args):
 
     trainer.update_target_model(model)
 
-    # reinforcement learning
-    policy.set_env(env)
-    robot.set_policy(policy)
-    robot.print_info()
-    trainer.set_learning_rate(rl_learning_rate)
     # fill the memory pool with some RL experience
     if args.resume:
         robot.policy.set_epsilon(epsilon_end)
-        explorer.run_k_episodes(100, 'train', update_memory=True, episode=0)
+        explorer.run_episodes(100, 'train', update_memory=True, episode=0)
         logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
+
+    # reinforcement learning
+    robot.set_policy(policy)
+    robot.print_info()
+    multiagent_env = MultiagentSim()
+    multiagent_env.configure(env_config, robot)
+    explorer = MultiagentExplorer(multiagent_env, robot, device, writer, memory, policy.gamma, target_policy=policy)
+    policy.set_env(multiagent_env)
+    trainer.set_learning_rate(rl_learning_rate)
+
     episode = 0
     best_val_reward = -1
     best_val_model = None
-    # evaluate the model after imitation learning
 
+    val_size = multiagent_env.case_size['val']
+    test_size = multiagent_env.case_size['test']
+    # evaluate the model after imitation learning
     if episode % evaluation_interval == 0:
         logging.info('Evaluate the model instantly after imitation learning on the validation cases')
-        explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode)
+        explorer.run_episodes(val_size, 'val', episode=episode)
         explorer.log('val', episode // evaluation_interval)
 
         if args.test_after_every_eval:
-            explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
+            explorer.run_episodes(test_size, 'test', episode=episode, print_failure=True)
             explorer.log('test', episode // evaluation_interval)
 
     episode = 0
@@ -203,7 +212,7 @@ def main(args):
         robot.policy.set_epsilon(epsilon)
 
         # sample k episodes into memory and optimize over the generated memory
-        explorer.run_k_episodes(sample_episodes, 'train', update_memory=True, episode=episode)
+        explorer.run_episodes(sample_episodes, 'train', update_memory=True, episode=episode)
         explorer.log('train', episode)
 
         trainer.optimize_batch(train_batches, episode)
@@ -213,7 +222,7 @@ def main(args):
             trainer.update_target_model(model)
         # evaluate the model
         if episode % evaluation_interval == 0:
-            _, _, _, reward, _ = explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode)
+            _, _, _, reward, _ = explorer.run_episodes(val_size, 'val', episode=episode)
             explorer.log('val', episode // evaluation_interval)
 
             if episode % checkpoint_interval == 0 and reward > best_val_reward:
@@ -221,7 +230,7 @@ def main(args):
                 best_val_model = copy.deepcopy(policy.get_state_dict())
         # test after every evaluation to check how the generalization performance evolves
             if args.test_after_every_eval:
-                explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
+                explorer.run_episodes(test_size, 'test', episode=episode, print_failure=True)
                 explorer.log('test', episode // evaluation_interval)
 
         if episode != 0 and episode % checkpoint_interval == 0:
@@ -234,7 +243,7 @@ def main(args):
         policy.load_state_dict(best_val_model)
         torch.save(best_val_model, os.path.join(args.output_dir, 'best_val.pth'))
         logging.info('Save the best val model with the reward: {}'.format(best_val_reward))
-    explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
+    explorer.run_episodes(test_size, 'test', episode=episode, print_failure=True)
 
 
 if __name__ == '__main__':

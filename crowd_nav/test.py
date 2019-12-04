@@ -140,7 +140,7 @@ def main(args):
             human_times = env.get_human_times()
             logging.info('Average time for humans to reach goal: %.2f', sum(human_times) / len(human_times))
     else:
-        explorer.run_k_episodes(env.case_size[args.phase], args.phase, print_failure=True)
+        explorer.run_episodes(env.case_size[args.phase], args.phase, print_failure=True)
         if args.plot_test_scenarios_hist:
             test_angle_seeds = np.array(env.test_scene_seeds)
             b = [i * 0.01 for i in range(101)]

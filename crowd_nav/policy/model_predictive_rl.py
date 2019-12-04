@@ -1,8 +1,9 @@
 import logging
+
 import torch
 import numpy as np
 from numpy.linalg import norm
-import itertools
+
 from crowd_sim.envs.policy.policy import Policy
 from crowd_sim.envs.utils.action import ActionRot, ActionXY
 from crowd_sim.envs.utils.state import tensor_to_joint_state

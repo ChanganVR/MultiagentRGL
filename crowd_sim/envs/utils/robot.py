@@ -5,6 +5,7 @@ from crowd_sim.envs.utils.state import JointState
 class Robot(Agent):
     def __init__(self, config, section):
         super().__init__(config, section)
+        self.last_state = None
 
     def act(self, ob):
         if self.policy is None:
@@ -12,4 +13,5 @@ class Robot(Agent):
 
         state = JointState(self.get_full_state(), ob)
         action = self.policy.predict(state)
+        self.last_state = self.policy.last_state
         return action
