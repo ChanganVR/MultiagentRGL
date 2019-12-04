@@ -119,7 +119,6 @@ def main(args):
     epsilon_end = train_config.train.epsilon_end
     epsilon_decay = train_config.train.epsilon_decay
     checkpoint_interval = train_config.train.checkpoint_interval
-    train_with_pretend_batch = train_config.train.train_with_pretend_batch
 
     # configure trainer and explorer
     memory = ReplayMemory(capacity)
@@ -161,10 +160,7 @@ def main(args):
         il_policy.safety_space = safety_space
         robot.set_policy(il_policy)
         explorer.run_k_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
-        if train_with_pretend_batch:
-            trainer.optimize_epoch_pretend_batch(il_epochs)
-        else:
-            trainer.optimize_epoch(il_epochs)
+        trainer.optimize_epoch(il_epochs)
         policy.save_model(il_weight_file)
         logging.info('Finish imitation learning. Weights saved.')
         logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
@@ -210,10 +206,7 @@ def main(args):
         explorer.run_k_episodes(sample_episodes, 'train', update_memory=True, episode=episode)
         explorer.log('train', episode)
 
-        if train_with_pretend_batch:
-            trainer.optimize_pretend_batch(train_batches)
-        else:
-            trainer.optimize_batch(train_batches, episode)
+        trainer.optimize_batch(train_batches, episode)
         episode += 1
 
         if episode % target_update_interval == 0:
@@ -264,9 +257,6 @@ if __name__ == '__main__':
     # parser.add_argument('--sim_func', type=str, default='embedded_gaussian')
     # parser.add_argument('--layerwise_graph', default=False, action='store_true')
     # parser.add_argument('--skip_connection', default=True, action='store_true')
-
-    # arguments for training with scenarios with variable number of pedestrians in one episode
-    parser.add_argument('--pretend_batch', default=False, action='store_true')
 
     sys_args = parser.parse_args()
 
