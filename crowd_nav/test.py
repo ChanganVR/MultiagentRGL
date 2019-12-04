@@ -134,10 +134,7 @@ def main(args):
                 else:
                     args.video_file = os.path.join(args.video_dir, policy_config.name)
                 args.video_file = args.video_file + '_' + args.phase + '_' + str(args.test_case) + '.mp4'
-            if env.current_scenario.startswith('realsim'):
-                env.render('dynamic_video', args.video_file)
-            else:
-                env.render('video', args.video_file)
+            env.render('video', args.video_file)
         logging.info('It takes %.2f seconds to finish. Final status is %s, cumulative_reward is %f', env.global_time, info, cumulative_reward)
         if robot.visible and info == 'reach goal':
             human_times = env.get_human_times()
@@ -173,7 +170,6 @@ if __name__ == '__main__':
     parser.add_argument('--group_size', type=int, default=None)
     parser.add_argument('--group_num', type=int, default=None)
     parser.add_argument('--safety_space', type=float, default=0.2)
-    #parser.add_argument('--test_scenario', type=str, default='realsim_GrandCentral')
     parser.add_argument('--test_scenario', type=str, default=None)
     parser.add_argument('--plot_test_scenarios_hist', default=True, action='store_true')
     parser.add_argument('-d', '--planning_depth', type=int, default=None)
