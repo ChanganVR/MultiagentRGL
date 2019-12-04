@@ -108,7 +108,6 @@ def main(args):
 
     # read training parameters
     train_config = config.TrainConfig(args.debug)
-    rl_train_epochs = train_config.train.rl_train_epochs
     rl_learning_rate = train_config.train.rl_learning_rate
     train_batches = train_config.train.train_batches
     train_episodes = train_config.train.train_episodes
@@ -196,87 +195,53 @@ def main(args):
             explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
             explorer.log('test', episode // evaluation_interval)
 
-    if args.save_stable_models:
-        stable_srs = []
-        stable_crs = []
-        stable_rewards = []
-        stable_times = []
-
-    for e_id in range(rl_train_epochs):
-        episode = 0
-        while episode < train_episodes:
-            if args.resume:
+    episode = 0
+    while episode < train_episodes:
+        if args.resume:
+            epsilon = epsilon_end
+        else:
+            if episode < epsilon_decay:
+                epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * episode
+            else:
                 epsilon = epsilon_end
-            else:
-                if episode < epsilon_decay:
-                    epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * episode
-                else:
-                    epsilon = epsilon_end
-            robot.policy.set_epsilon(epsilon)
+        robot.policy.set_epsilon(epsilon)
 
-            # sample k episodes into memory and optimize over the generated memory
-            explorer.run_k_episodes(sample_episodes, 'train', update_memory=True, episode=episode, epoch=e_id)
-            explorer.log('train', episode + train_episodes * e_id)
+        # sample k episodes into memory and optimize over the generated memory
+        explorer.run_k_episodes(sample_episodes, 'train', update_memory=True, episode=episode)
+        explorer.log('train', episode)
 
-            if train_with_pretend_batch:
-                trainer.optimize_pretend_batch(train_batches)
-            else:
-                trainer.optimize_batch(train_batches, episode)
-            episode += 1
+        if train_with_pretend_batch:
+            trainer.optimize_pretend_batch(train_batches)
+        else:
+            trainer.optimize_batch(train_batches, episode)
+        episode += 1
 
-            if (episode + train_episodes * e_id) % target_update_interval == 0:
-                trainer.update_target_model(model)
-            # evaluate the model
-            if (episode + train_episodes * e_id) % evaluation_interval == 0:
-                _, _, _, reward, _ = explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode, epoch=e_id)
-                explorer.log('val', (episode + train_episodes * e_id) // evaluation_interval)
+        if episode % target_update_interval == 0:
+            trainer.update_target_model(model)
+        # evaluate the model
+        if episode % evaluation_interval == 0:
+            _, _, _, reward, _ = explorer.run_k_episodes(env.case_size['val'], 'val', episode=episode)
+            explorer.log('val', episode // evaluation_interval)
 
-                if (episode + train_episodes * e_id) % checkpoint_interval == 0 and reward > best_val_reward:
-                    best_val_reward = reward
-                    best_val_model = copy.deepcopy(policy.get_state_dict())
-            # test after every evaluation to check how the generalization performance evolves
-                if args.test_after_every_eval:
-                    explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, epoch=e_id, print_failure=True)
-                    explorer.log('test', (episode + train_episodes * e_id) // evaluation_interval)
+            if episode % checkpoint_interval == 0 and reward > best_val_reward:
+                best_val_reward = reward
+                best_val_model = copy.deepcopy(policy.get_state_dict())
+        # test after every evaluation to check how the generalization performance evolves
+            if args.test_after_every_eval:
+                explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
+                explorer.log('test', episode // evaluation_interval)
 
-            if episode != 0 and (episode + train_episodes * e_id) % checkpoint_interval == 0:
-                current_checkpoint = (episode + train_episodes * e_id) // checkpoint_interval - 1
-                save_every_checkpoint_rl_weight_file = rl_weight_file.split('.')[0] + '_' + str(current_checkpoint) + '.pth'
-                policy.save_model(save_every_checkpoint_rl_weight_file)
-
-            if args.save_stable_models:
-                stable_checkpoint_interval = 20
-                save_after = 0.9
-                total_stable_models = train_episodes * (1 - save_after) // stable_checkpoint_interval
-                test_size = int(env_config.env.test_size // total_stable_models)
-                logging.info('check the test_size: {}'.format(test_size))
-                logging.info('save_after: {}'.format(save_after))
-                logging.info('stable_checkpoint_interval: {}'.format(stable_checkpoint_interval))
-                if (episode + train_episodes * e_id) >= train_episodes * save_after:
-                    if episode != 0 and (episode + train_episodes * e_id) % stable_checkpoint_interval == 0:
-                        current_stable_checkpoint = (episode + train_episodes * e_id) // stable_checkpoint_interval - 1
-                        save_every_stable_rl_weight_file = rl_weight_file.split('.')[0] + '_' + str(episode) + '.pth'
-                        policy.save(save_every_stable_rl_weight_file)
-                        logging.info('check the env.case_encounter: {}'.format(env.case_counter['test']))
-                        sr, cr, time, reward = explorer.run_k_episodes(test_size, 'test', episode=episode, epoch=e_id, print_failure=True)
-                        explorer.log('stable_test', (episode + train_episodes * e_id) // stable_checkpoint_interval)
-                        stable_srs.append(sr)
-                        stable_crs.append(cr)
-                        stable_times.append(time)
-                        stable_rewards.append(reward)
-
-    if args.save_stable_models:
-        logging.info('the {} stable models average reward on the test scenarios are :{}'.format(len(stable_rewards), sum(stable_rewards)/len(stable_rewards)))
-        logging.info('the {} stable models average sr on the test scenarios are :{}'.format(len(stable_srs), sum(stable_srs) /len(stable_srs)))
-        logging.info('the {} stable models average cr on the test scenarios are :{}'.format(len(stable_crs), sum(stable_crs) /len(stable_crs)))
-        logging.info('the {} stable models average time on the test scenarios are :{}'.format(len(stable_times), sum(stable_times) /len(stable_times)))
+        if episode != 0 and episode % checkpoint_interval == 0:
+            current_checkpoint = episode // checkpoint_interval - 1
+            save_every_checkpoint_rl_weight_file = rl_weight_file.split('.')[0] + '_' + str(current_checkpoint) + '.pth'
+            policy.save_model(save_every_checkpoint_rl_weight_file)
 
     # # test with the best val model
     if best_val_model is not None:
         policy.load_state_dict(best_val_model)
         torch.save(best_val_model, os.path.join(args.output_dir, 'best_val.pth'))
         logging.info('Save the best val model with the reward: {}'.format(best_val_reward))
-    explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, epoch=e_id, print_failure=True)
+    explorer.run_k_episodes(env.case_size['test'], 'test', episode=episode, print_failure=True)
 
 
 if __name__ == '__main__':
@@ -292,7 +257,6 @@ if __name__ == '__main__':
     parser.add_argument('--save_scene', default=False, action='store_true')
     parser.add_argument('--test_after_every_eval', default=False, action='store_true')
     parser.add_argument('--randomseed', type=int, default=17)
-    parser.add_argument('--save_stable_models', default=False, action='store_true')
 
     # arguments for GCN
     # parser.add_argument('--X_dim', type=int, default=32)
