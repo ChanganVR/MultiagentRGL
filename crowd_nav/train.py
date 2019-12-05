@@ -95,11 +95,9 @@ def main(args):
 
     # configure environment
     env_config = config.EnvConfig(args.debug)
-    env = gym.make('CrowdSim-v0')
+    env = MultiagentSim()
     env.configure(env_config)
-    robot = Robot(env_config, 'robot')
-    robot.time_step = env.time_step
-    env.set_robot(robot)
+    agents = env.agents
 
     # read training parameters
     train_config = config.TrainConfig(args.debug)
@@ -120,24 +118,10 @@ def main(args):
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
     optimizer = train_config.trainer.optimizer
-    if policy_config.name == 'model_predictive_rl':
-        trainer = MPRLTrainer(model, policy.state_predictor, memory, device, policy, writer, batch_size, optimizer, env.human_num,
-                              reduce_sp_update_frequency=train_config.train.reduce_sp_update_frequency,
-                              freeze_state_predictor=train_config.train.freeze_state_predictor,
-                              detach_state_predictor=train_config.train.detach_state_predictor,
-                              share_graph_model=policy_config.model_predictive_rl.share_graph_model)
-    else:
-        trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
-    explorer = Explorer(env, robot, device, writer, memory, policy.gamma, target_policy=policy)
+    trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
+    explorer = MultiagentExplorer(env, device, writer, memory, policy.gamma, target_policy=policy)
 
-    # imitation learning
-    if args.resume:
-        if not os.path.exists(rl_weight_file):
-            logging.error('RL weights does not exist')
-        model.load_state_dict(torch.load(rl_weight_file))
-        rl_weight_file = os.path.join(args.output_dir, 'resumed_rl_model.pth')
-        logging.info('Load reinforcement learning trained weights. Resume training')
-    elif os.path.exists(il_weight_file):
+    if os.path.exists(il_weight_file):
         model.load_state_dict(torch.load(il_weight_file))
         logging.info('Load imitation learning trained weights.')
     else:
@@ -146,14 +130,11 @@ def main(args):
         il_epochs = train_config.imitation_learning.il_epochs
         il_learning_rate = train_config.imitation_learning.il_learning_rate
         trainer.set_learning_rate(il_learning_rate)
-        if robot.visible:
-            safety_space = 0
-        else:
-            safety_space = train_config.imitation_learning.safety_space
+
         il_policy = policy_factory[il_policy]()
         il_policy.multiagent_training = policy.multiagent_training
-        il_policy.safety_space = safety_space
-        robot.set_policy(il_policy)
+        for agent in agents:
+            agent.set_policy(il_policy)
         explorer.run_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)
         trainer.optimize_epoch(il_epochs)
         policy.save_model(il_weight_file)
@@ -162,27 +143,17 @@ def main(args):
 
     trainer.update_target_model(model)
 
-    # fill the memory pool with some RL experience
-    if args.resume:
-        robot.policy.set_epsilon(epsilon_end)
-        explorer.run_episodes(100, 'train', update_memory=True, episode=0)
-        logging.info('Experience set size: %d/%d', len(memory), memory.capacity)
-
     # reinforcement learning
-    robot.set_policy(policy)
-    robot.print_info()
-    multiagent_env = MultiagentSim()
-    multiagent_env.configure(env_config, robot)
-    explorer = MultiagentExplorer(multiagent_env, robot, device, writer, memory, policy.gamma, target_policy=policy)
-    policy.set_env(multiagent_env)
+    for agent in agents:
+        agent.set_policy(policy)
     trainer.set_learning_rate(rl_learning_rate)
 
     episode = 0
     best_val_reward = -1
     best_val_model = None
 
-    val_size = multiagent_env.case_size['val']
-    test_size = multiagent_env.case_size['test']
+    val_size = env.case_size['val']
+    test_size = env.case_size['test']
     # evaluate the model after imitation learning
     if episode % evaluation_interval == 0:
         logging.info('Evaluate the model instantly after imitation learning on the validation cases')
@@ -195,14 +166,11 @@ def main(args):
 
     episode = 0
     while episode < train_episodes:
-        if args.resume:
-            epsilon = epsilon_end
+        if episode < epsilon_decay:
+            epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * episode
         else:
-            if episode < epsilon_decay:
-                epsilon = epsilon_start + (epsilon_end - epsilon_start) / epsilon_decay * episode
-            else:
-                epsilon = epsilon_end
-        robot.policy.set_epsilon(epsilon)
+            epsilon = epsilon_end
+        policy.set_epsilon(epsilon)
 
         # sample k episodes into memory and optimize over the generated memory
         explorer.run_episodes(sample_episodes, 'train', update_memory=True, episode=episode)

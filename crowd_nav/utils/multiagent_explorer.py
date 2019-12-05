@@ -7,7 +7,7 @@ from crowd_sim.envs.utils.info import *
 
 
 class MultiagentExplorer(object):
-    def __init__(self, env, robot, device, writer, memory=None, gamma=None, target_policy=None):
+    def __init__(self, env, device, writer, memory=None, gamma=None, target_policy=None):
         self.env = env
         self.agents = env.agents
         self.device = device
@@ -77,7 +77,7 @@ class MultiagentExplorer(object):
                 if isinstance(info, ReachGoal) or isinstance(info, Collision):
                     # only add positive(success) or negative(collision) experience in experience set
                     for k in range(len(self.agents)):
-                        self.update_memory(agent_states[k], rewards)
+                        self.update_memory(agent_states[k], rewards, imitation_learning)
 
             cumulative_rewards.append(sum([pow(self.gamma, t * self.time_step * self.v_pref)
                                            * reward for t, reward in enumerate(rewards)]))
@@ -114,25 +114,31 @@ class MultiagentExplorer(object):
 
         return self.statistics
 
-    def update_memory(self, states, rewards):
+    def update_memory(self, states, rewards, imitation_learning=False):
         if self.memory is None or self.gamma is None:
             raise ValueError('Memory or gamma value is not set!')
         
         for i, state in enumerate(states[:-1]):
             reward = rewards[i]
-            next_state = states[i+1]
-            if i == len(states) - 1:
-                # terminal state
-                value = reward
+
+            # VALUE UPDATE
+            if imitation_learning:
+                # define the value of states in IL as cumulative discounted rewards, which is the same in RL
+                state = self.target_policy.transform(state)
+                next_state = self.target_policy.transform(states[i+1])
+                value = sum([pow(self.gamma, (t - i) * self.time_step * self.v_pref) * reward *
+                             (1 if t >= i else 0) for t, reward in enumerate(rewards)])
             else:
-                value = 0
+                next_state = states[i+1]
+                if i == len(states) - 1:
+                    # terminal state
+                    value = reward
+                else:
+                    value = 0
             value = torch.Tensor([value]).to(self.device)
             reward = torch.Tensor([rewards[i]]).to(self.device)
 
-            if self.target_policy.name == 'ModelPredictiveRL':
-                self.memory.push((state[0], state[1], value, reward, next_state[0], next_state[1]))
-            else:
-                self.memory.push((state, value, reward, next_state))
+            self.memory.push((state, value, reward, next_state))
 
     def log(self, tag_prefix, global_step):
         sr, cr, time, reward, avg_return = self.statistics

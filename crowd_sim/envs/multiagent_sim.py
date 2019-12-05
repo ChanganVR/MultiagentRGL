@@ -78,7 +78,7 @@ class MultiagentSim(gym.Env):
         self.num_agent = None
         self.agents = None
 
-    def configure(self, config, robot):
+    def configure(self, config):
         self.config = config
         self.time_limit = config.env.time_limit
         self.time_step = config.env.time_step
@@ -100,38 +100,44 @@ class MultiagentSim(gym.Env):
         logging.info('Square width: {}, circle width: {}'.format(self.square_width, self.circle_radius))
 
         self.human_num = config.sim.human_num
-        self.agents = [robot] + [Robot(config, 'robot') for _ in range(self.human_num)]
-        for agent in self.agents[1:]:
-            agent.policy = robot.policy
-            agent.kinematics = robot.kinematics
+        self.agents = [Robot(config, 'robot') for _ in range(self.human_num)]
+        for agent in self.agents:
+            agent.time_step = self.time_step
+        # for agent in self.agents[1:]:
+        #     agent.policy = robot.policy
+        #     agent.kinematics = robot.kinematics
 
     def reset_agent_states(self):
-        self.agents[0].set(0, -self.circle_radius, 0, self.circle_radius, 0, 0, np.pi / 2)
-        self.agents[1].set(-self.circle_radius, 0, self.circle_radius, 0, 0, 0, 0)
-        self.agents[2].set(self.circle_radius, 0, -self.circle_radius, 0, 0, 0, 0)
-        self.agents[3].set(0, self.circle_radius, 0, -self.circle_radius, 0, 0, np.pi / 2)
-        self.agents[4].set(self.circle_radius * 0.71, self.circle_radius * 0.71,
-                           -self.circle_radius * 0.71, -self.circle_radius * 0.71, 0, 0, 0)
-        self.agents[5].set(-self.circle_radius * 0.71, -self.circle_radius * 0.71,
-                           self.circle_radius * 0.71, self.circle_radius * 0.71, 0, 0, 0)
-        # if self.current_scenario == 'circle_crossing':
-        #     while True:
-        #         angle = np.random.random() * np.pi * 2
-        #         # add some noise to simulate all the possible cases robot could meet with human
-        #         px_noise = (np.random.random() - 0.5) * human.v_pref
-        #         py_noise = (np.random.random() - 0.5) * human.v_pref
-        #         px = self.circle_radius * np.cos(angle) + px_noise
-        #         py = self.circle_radius * np.sin(angle) + py_noise
-        #         collide = False
-        #         for agent in [self.robot] + self.humans:
-        #             min_dist = human.radius + agent.radius + self.discomfort_dist
-        #             if norm((px - agent.px, py - agent.py)) < min_dist or \
-        #                     norm((px - agent.gx, py - agent.gy)) < min_dist:
-        #                 collide = True
-        #                 break
-        #         if not collide:
-        #             break
-        #     human.set(px, py, -px, -py, 0, 0, 0)
+        # self.agents[0].set(0, -self.circle_radius, 0, self.circle_radius, 0, 0, np.pi / 2)
+        # self.agents[1].set(-self.circle_radius, 0, self.circle_radius, 0, 0, 0, 0)
+        # self.agents[2].set(self.circle_radius, 0, -self.circle_radius, 0, 0, 0, 0)
+        # self.agents[3].set(0, self.circle_radius, 0, -self.circle_radius, 0, 0, np.pi / 2)
+        # self.agents[4].set(self.circle_radius * 0.71, self.circle_radius * 0.71,
+        #                    -self.circle_radius * 0.71, -self.circle_radius * 0.71, 0, 0, 0)
+        # self.agents[5].set(-self.circle_radius * 0.71, -self.circle_radius * 0.71,
+        #                    self.circle_radius * 0.71, self.circle_radius * 0.71, 0, 0, 0)
+
+        if self.current_scenario == 'circle_crossing':
+            existing_agents = list()
+            for agent in self.agents:
+                while True:
+                    angle = np.random.random() * np.pi * 2
+                    # add some noise to simulate all the possible cases robot could meet with human
+                    px_noise = (np.random.random() - 0.5) * agent.v_pref
+                    py_noise = (np.random.random() - 0.5) * agent.v_pref
+                    px = self.circle_radius * np.cos(angle) + px_noise
+                    py = self.circle_radius * np.sin(angle) + py_noise
+                    collide = False
+                    for existing_agent in existing_agents:
+                        min_dist = agent.radius + existing_agent.radius
+                        if norm((px - existing_agent.px, py - existing_agent.py)) < min_dist or \
+                                norm((px - existing_agent.gx, py - existing_agent.gy)) < min_dist:
+                            collide = True
+                            break
+                    if not collide:
+                        break
+                agent.set(px, py, -px, -py, 0, 0, 0)
+                existing_agents.append(agent)
 
     def reset(self, phase='test', test_case=None):
         """
@@ -153,6 +159,7 @@ class MultiagentSim(gym.Env):
             random.seed(base_seed[phase] + self.case_counter[phase])
             if phase == 'test':
                 logging.debug('current test seed is:{}'.format(base_seed[phase] + self.case_counter[phase]))
+            self.current_scenario = 'circle_crossing'
             self.reset_agent_states()
             self.case_counter[phase] = (self.case_counter[phase] + 1) % self.case_size[phase]
         else:
@@ -193,10 +200,10 @@ class MultiagentSim(gym.Env):
             reward = 0
             done = True
             info = Timeout()
-        elif collision:
-            reward = self.collision_penalty
-            done = True
-            info = Collision()
+        # elif collision:
+        #     reward = self.collision_penalty
+        #     done = True
+        #     info = Collision()
         elif all(reaching_goals):
             reward = self.success_reward
             done = True

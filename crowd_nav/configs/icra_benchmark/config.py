@@ -13,7 +13,7 @@ class Config(object):
 
 class BaseEnvConfig(object):
     env = Config()
-    env.time_limit = 30
+    env.time_limit = 50
     env.time_step = 0.25
     env.val_size = 100
     env.test_size = 500
@@ -46,7 +46,7 @@ class BaseEnvConfig(object):
     humans.sensor = 'coordinates'
 
     robot = Config()
-    robot.visible = False
+    robot.visible = True
     robot.policy = 'none'
     robot.radius = 0.3
     robot.v_pref = 1
