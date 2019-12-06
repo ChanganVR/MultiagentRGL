@@ -8,15 +8,14 @@ from crowd_sim.envs.policy.policy import Policy
 from crowd_sim.envs.utils.action import ActionRot, ActionXY
 from crowd_sim.envs.utils.state import tensor_to_joint_state
 from crowd_sim.envs.utils.utils import point_to_segment_dist
-from crowd_nav.policy.state_predictor import StatePredictor, LinearStatePredictor
 from crowd_nav.policy.graph_model import RGL
-from crowd_nav.policy.value_estimator import ValueEstimator
+from crowd_nav.policy.value_action_predictor import ValueActionPredictor
 
 
-class ModelPredictiveRL(Policy):
+class RglActorCritic(Policy):
     def __init__(self):
         super().__init__()
-        self.name = 'ModelPredictiveRL'
+        self.name = 'RglActorCritic'
         self.trainable = True
         self.multiagent_training = True
         self.kinematics = None
@@ -34,11 +33,7 @@ class ModelPredictiveRL(Policy):
         self.human_state_dim = 5
         self.v_pref = 1
         self.share_graph_model = None
-        self.value_estimator = None
-        self.linear_state_predictor = None
-        self.state_predictor = None
-        self.planning_depth = None
-        self.planning_width = None
+        self.value_action_predictor = None
         self.do_action_clip = None
         self.sparse_search = None
         self.sparse_speed_samples = 2
@@ -48,39 +43,20 @@ class ModelPredictiveRL(Policy):
 
     def configure(self, config):
         self.set_common_parameters(config)
-        self.planning_depth = config.model_predictive_rl.planning_depth
-        self.do_action_clip = config.model_predictive_rl.do_action_clip
-        if hasattr(config.model_predictive_rl, 'sparse_search'):
-            self.sparse_search = config.model_predictive_rl.sparse_search
-        self.planning_width = config.model_predictive_rl.planning_width
-        self.share_graph_model = config.model_predictive_rl.share_graph_model
-        self.linear_state_predictor = config.model_predictive_rl.linear_state_predictor
+        self.do_action_clip = config.rgl_actor_critic.do_action_clip        
+        self.share_graph_model = config.rgl_actor_critic.share_graph_model
 
-        if self.linear_state_predictor:
-            self.state_predictor = LinearStatePredictor(config, self.time_step)
+        if self.share_graph_model:
             graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
-            self.value_estimator = ValueEstimator(config, graph_model)
-            self.model = [graph_model, self.value_estimator.value_network]
+            self.value_action_predictor = ValueActionPredictor(config, graph_model)            
+            self.model = [graph_model, self.value_action_predictor.value_network, \
+                          self.value_action_predictor.action_network]
         else:
-            if self.share_graph_model:
-                graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
-                self.value_estimator = ValueEstimator(config, graph_model)
-                self.state_predictor = StatePredictor(config, graph_model, self.time_step)
-                self.model = [graph_model, self.value_estimator.value_network, self.state_predictor.human_motion_predictor]
-            else:
-                graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim)
-                self.value_estimator = ValueEstimator(config, graph_model1)
-                graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim)
-                self.state_predictor = StatePredictor(config, graph_model2, self.time_step)
-                self.model = [graph_model1, graph_model2, self.value_estimator.value_network,
-                              self.state_predictor.human_motion_predictor]
-
-        logging.info('Planning depth: {}'.format(self.planning_depth))
-        logging.info('Planning width: {}'.format(self.planning_width))
-        logging.info('Sparse search: {}'.format(self.sparse_search))
-
-        if self.planning_depth > 1 and not self.do_action_clip:
-            logging.warning('Performing d-step planning without action space clipping!')
+            graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim)
+            graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim)
+            self.value_action_predictor = ValueActionPredictor(config, graph_model1, graph_model2, False)            
+            self.model = [graph_model1, graph_model2, self.value_action_predictor.value_network, \
+                          self.value_action_predictor.action_network]
 
     def set_common_parameters(self, config):
         self.gamma = config.rl.gamma
@@ -106,45 +82,37 @@ class ModelPredictiveRL(Policy):
         return pow(self.gamma, self.time_step * self.v_pref)
 
     def get_model(self):
-        return self.value_estimator
+        return self.value_action_predictor
 
     def get_state_dict(self):
-        if self.state_predictor.trainable:
-            if self.share_graph_model:
-                return {
-                    'graph_model': self.value_estimator.graph_model.state_dict(),
-                    'value_network': self.value_estimator.value_network.state_dict(),
-                    'motion_predictor': self.state_predictor.human_motion_predictor.state_dict()
-                }
-            else:
-                return {
-                    'graph_model1': self.value_estimator.graph_model.state_dict(),
-                    'graph_model2': self.state_predictor.graph_model.state_dict(),
-                    'value_network': self.value_estimator.value_network.state_dict(),
-                    'motion_predictor': self.state_predictor.human_motion_predictor.state_dict()
-                }
+        if self.share_graph_model:
+            return {
+                'graph_model': self.value_action_predictor.graph_model.state_dict(),
+                'value_network': self.value_action_predictor.value_network.state_dict(),
+                'action_network': self.value_action_predictor.action_network.state_dict()
+            }
         else:
             return {
-                    'graph_model': self.value_estimator.graph_model.state_dict(),
-                    'value_network': self.value_estimator.value_network.state_dict()
-                }
+                'graph_model1': self.value_action_predictor.graph_model_val.state_dict(),
+                'graph_model2': self.value_action_predictor.graph_model_act.state_dict(),
+                'value_network': self.value_action_predictor.value_network.state_dict(),
+                'action_network': self.value_action_predictor.action_network.state_dict()
+            }
+
 
     def get_traj(self):
         return self.traj
 
-    def load_state_dict(self, state_dict):
-        if self.state_predictor.trainable:
-            if self.share_graph_model:
-                self.value_estimator.graph_model.load_state_dict(state_dict['graph_model'])
-            else:
-                self.value_estimator.graph_model.load_state_dict(state_dict['graph_model1'])
-                self.state_predictor.graph_model.load_state_dict(state_dict['graph_model2'])
-
-            self.value_estimator.value_network.load_state_dict(state_dict['value_network'])
-            self.state_predictor.human_motion_predictor.load_state_dict(state_dict['motion_predictor'])
+    def load_state_dict(self, state_dict):        
+        if self.share_graph_model:
+            self.value_action_predictor.graph_model.load_state_dict(state_dict['graph_model'])
         else:
-            self.value_estimator.graph_model.load_state_dict(state_dict['graph_model'])
-            self.value_estimator.value_network.load_state_dict(state_dict['value_network'])
+            self.value_action_predictor.graph_model_val.load_state_dict(state_dict['graph_model1'])
+            self.value_action_predictor.graph_model_act.load_state_dict(state_dict['graph_model2'])
+
+        self.value_action_predictor.value_network.load_state_dict(state_dict['value_network'])
+        self.value_action_predictor.action_network.load_state_dict(state_dict['action_network'])
+
 
     def save_model(self, file):
         torch.save(self.get_state_dict(), file)
