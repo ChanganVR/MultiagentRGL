@@ -43,8 +43,8 @@ class RglActorCritic(Policy):
 
     def configure(self, config):
         self.set_common_parameters(config)
-        self.do_action_clip = config.rgl_actor_critic.do_action_clip        
-        self.share_graph_model = config.rgl_actor_critic.share_graph_model
+        self.do_action_clip = config.model_predictive_rl.do_action_clip        
+        self.share_graph_model = config.model_predictive_rl.share_graph_model
 
         if self.share_graph_model:
             graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
