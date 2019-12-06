@@ -188,6 +188,13 @@ class RglActorCritic(Policy):
             
         return action_to_take[0]
     
+    def evaluate_actions(self, state_tensor, actions_tensor):
+        value, action_feat = self.value_action_predictor(state_tensor)
+        dist = FixedCategorical(action_feat)
+        action_log_probs = dist.log_probs(actions_tensor)
+        
+        return value, action_log_probs
+    
     def action_index_to_action(self, indices): #indices: (batch_size, 1) tensor
         action_to_take = []
         batch_size = list(indices.size())[0]
