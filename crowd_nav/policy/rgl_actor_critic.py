@@ -158,169 +158,43 @@ class RglActorCritic(Policy):
         self.rotations = rotations
         self.action_space = action_space
 
-    def predict(self, state):
-        """
-        A base class for all methods that takes pairwise joint state as input to value network.
-        The input to the value network is always of shape (batch_size, # humans, rotated joint state length)
-        """
+    def act(self, state_tensor): #state is a batch of tensors rather than a joint state
         if self.phase is None or self.device is None:
             raise AttributeError('Phase, device attributes have to be set!')
         if self.phase == 'train' and self.epsilon is None:
             raise AttributeError('Epsilon attribute has to be set in training phase')
-
         if self.reach_destination(state):
             return ActionXY(0, 0) if self.kinematics == 'holonomic' else ActionRot(0, 0)
         if self.action_space is None:
             self.build_action_space(state.robot_state.v_pref)
-
-        probability = np.random.random()
-        if self.phase == 'train' and probability < self.epsilon:
-            max_action = self.action_space[np.random.choice(len(self.action_space))]
-        else:
-            max_action = None
-            max_value = float('-inf')
-            max_traj = None
-
-            if self.do_action_clip:
-                state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
-                action_space_clipped = self.action_clip(state_tensor, self.action_space, self.planning_width)
-            else:
-                action_space_clipped = self.action_space
-
-            for action in action_space_clipped:
-                state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
-                next_state = self.state_predictor(state_tensor, action)
-                max_next_return, max_next_traj = self.V_planning(next_state, self.planning_depth, self.planning_width)
-                reward_est = self.estimate_reward(state, action)
-                value = reward_est + self.get_normalized_gamma() * max_next_return
-                if value > max_value:
-                    max_value = value
-                    max_action = action
-                    max_traj = [(state_tensor, action, reward_est)] + max_next_traj
-            if max_action is None:
-                raise ValueError('Value network is not well trained.')
-
+            
+        value, action_feat = self.value_action_predictor(state_tensor)
+        dist = FixedCategorical(action_feat)
+        action = dist.sample()
+        action_log_probs = dist.log_probs(action)
+        action_to_take = self.action_index_to_action(action)
+        
+        return value, action, action_log_probs, action_to_take
+    
+    def predict(self, state): #used in Agent class; state must be a joint state
+        """
+        A base class for all methods that takes pairwise joint state as input to value network.
+        The input to the value network is always of shape (batch_size, # humans, rotated joint state length)
+        """
+        state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
+        _, _, _, action_to_take = self.act(state_tensor)
         if self.phase == 'train':
             self.last_state = self.transform(state)
-        else:
-            self.traj = max_traj
-
-        return max_action
-
-    def action_clip(self, state, action_space, width, depth=1):
-        values = []
-
-        for action in action_space:
-            next_state_est = self.state_predictor(state, action)
-            next_return, _ = self.V_planning(next_state_est, depth, width)
-            reward_est = self.estimate_reward(state, action)
-            value = reward_est + self.get_normalized_gamma() * next_return
-            values.append(value)
-
-        if self.sparse_search:
-            # self.sparse_speed_samples = 2
-            # search in a sparse grained action space
-            added_groups = set()
-            max_indices = np.argsort(np.array(values))[::-1]
-            clipped_action_space = []
-            for index in max_indices:
-                if self.action_group_index[index] not in added_groups:
-                    clipped_action_space.append(action_space[index])
-                    added_groups.add(self.action_group_index[index])
-                    if len(clipped_action_space) == width:
-                        break
-        else:
-            max_indexes = np.argpartition(np.array(values), -width)[-width:]
-            clipped_action_space = [action_space[i] for i in max_indexes]
-
-        # print(clipped_action_space)
-        return clipped_action_space
-
-    def V_planning(self, state, depth, width):
-        """ Plans n steps into future. Computes the value for the current state as well as the trajectories
-        defined as a list of (state, action, reward) triples
-        """
-
-        current_state_value = self.value_estimator(state)
-        if depth == 1:
-            return current_state_value, [(state, None, None)]
-
-        if self.do_action_clip:
-            action_space_clipped = self.action_clip(state, self.action_space, width)
-        else:
-            action_space_clipped = self.action_space
-
-        returns = []
-        trajs = []
-
-        for action in action_space_clipped:
-            next_state_est = self.state_predictor(state, action)
-            reward_est = self.estimate_reward(state, action)
-            next_value, next_traj = self.V_planning(next_state_est, depth - 1, self.planning_width)
-            return_value = current_state_value / depth + (depth - 1) / depth * (self.get_normalized_gamma() * next_value + reward_est)
-
-            returns.append(return_value)
-            trajs.append([(state, action, reward_est)] + next_traj)
-
-        max_index = np.argmax(returns)
-        max_return = returns[max_index]
-        max_traj = trajs[max_index]
-
-        return max_return, max_traj
-
-    def estimate_reward(self, state, action):
-        """ If the time step is small enough, it's okay to model agent as linear movement during this period
-        """
-        # collision detection
-        if isinstance(state, list) or isinstance(state, tuple):
-            state = tensor_to_joint_state(state)
-        human_states = state.human_states
-        robot_state = state.robot_state
-
-        dmin = float('inf')
-        collision = False
-        for i, human in enumerate(human_states):
-            px = human.px - robot_state.px
-            py = human.py - robot_state.py
-            if self.kinematics == 'holonomic':
-                vx = human.vx - action.vx
-                vy = human.vy - action.vy
-            else:
-                vx = human.vx - action.v * np.cos(action.r + robot_state.theta)
-                vy = human.vy - action.v * np.sin(action.r + robot_state.theta)
-            ex = px + vx * self.time_step
-            ey = py + vy * self.time_step
-            # closest distance between boundaries of two agents
-            closest_dist = point_to_segment_dist(px, py, ex, ey, 0, 0) - human.radius - robot_state.radius
-            if closest_dist < 0:
-                collision = True
-                break
-            elif closest_dist < dmin:
-                dmin = closest_dist
-
-        # check if reaching the goal
-        if self.kinematics == 'holonomic':
-            px = robot_state.px + action.vx * self.time_step
-            py = robot_state.py + action.vy * self.time_step
-        else:
-            theta = robot_state.theta + action.r
-            px = robot_state.px + np.cos(theta) * action.v * self.time_step
-            py = robot_state.py + np.sin(theta) * action.v * self.time_step
-
-        end_position = np.array((px, py))
-        reaching_goal = norm(end_position - np.array([robot_state.gx, robot_state.gy])) < robot_state.radius
-
-        if collision:
-            reward = -0.25
-        elif reaching_goal:
-            reward = 1
-        elif dmin < 0.2:
-            # adjust the reward based on FPS
-            reward = (dmin - 0.2) * 0.5 * self.time_step
-        else:
-            reward = 0
-
-        return reward
+            
+        return action_to_take[0]
+    
+    def action_index_to_action(self, indices): #indices: (batch_size, 1) tensor
+        action_to_take = []
+        batch_size = list(indices.size())[0]
+        for i in range(batch_size):
+            action_to_take.append(self.action_space[indices[i,0].item()])
+        return action_to_take 
+    
 
     def transform(self, state):
         """
@@ -333,3 +207,20 @@ class RglActorCritic(Policy):
             to(self.device)
 
         return robot_state_tensor, human_states_tensor
+    
+    
+class FixedCategorical(torch.distributions.Categorical):
+    def sample(self):
+        return super().sample().unsqueeze(-1)
+
+    def log_probs(self, actions):
+        return (
+            super()
+            .log_prob(actions.squeeze(-1))
+            .view(actions.size(0), -1)
+            .sum(-1)
+            .unsqueeze(-1)
+        )
+
+    def mode(self):
+        return self.probs.argmax(dim=-1, keepdim=True)
