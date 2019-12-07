@@ -137,9 +137,12 @@ class MultiagentExplorer(object):
         if self.memory is None or self.gamma is None:
             raise ValueError('Memory or gamma value is not set!')
         
-        for i, state in enumerate(states[:-1]):
+        _gamma = pow(self.gamma, self.time_step * self.v_pref)
+        gae = 0
+        
+        for i, state in reversed(list(enumerate(states[:-1]))):
             reward = rewards[i]
-
+           
             # VALUE UPDATE
             if imitation_learning:
                 # define the value of states in IL as cumulative discounted rewards, which is the same in RL
@@ -159,6 +162,14 @@ class MultiagentExplorer(object):
 #                     value = reward
 #                 else:
 #                     value = 0
+                delta = rewards[i] + _gamma * values[i + 1] - values[i]
+                gae = delta + _gamma * gae  # * gae_lambda
+                reward_to_go = gae + values[i] # i.e., return
+                
+                reward_to_go = torch.Tensor([reward_to_go]).to(self.device)
+                value = torch.Tensor([values[i]]).to(self.device)
+                reward = torch.Tensor([rewards[i]]).to(self.device)
+                self.memory.push((state, value, reward, action[i], reward_to_go, action_log_probs[i]))
                 
 
 
