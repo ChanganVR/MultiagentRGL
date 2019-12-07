@@ -323,14 +323,18 @@ class RglACTrainer(object):
         losses = 0
         batch_count = 0
         for data in self.data_loader:
-            inputs, _, rewards, next_states = data
+            inputs, values, rewards, actions, returns, old_action_log_probs, adv_args = data
             self.optimizer.zero_grad()
-            outputs = self.model(inputs)
-
-            gamma_bar = pow(self.gamma, self.time_step * self.v_pref)
-            target_values = rewards + gamma_bar * self.target_model(next_states)
-
-            loss = self.criterion(outputs, target_values)
+            outputs_vals, outputs_act_feats = self.model(inputs)
+            action_log_probs = FixedCategorical(outputs_act_feats).log_probs(actions)
+            
+            ratio = torch.exp(action_log_probs - old_action_log_probs)
+            surr1 = ratio * adv_targs
+            surr2 = torch.clamp(ratio, 1.0 - self.clip_param,
+                                    1.0 + self.clip_param) * adv_targs
+            loss1 = -torch.min(surr1, surr2).mean()
+            loss2 = self.criterion_val(outputs_vals, values)
+            loss = loss1 + loss2
             loss.backward()
             self.optimizer.step()
             losses += loss.data.item()
@@ -364,3 +368,19 @@ def pad_batch(batch):
     next_states = sort_states(3)
 
     return states, values, rewards, next_states
+
+class FixedCategorical(torch.distributions.Categorical):
+    def sample(self):
+        return super().sample().unsqueeze(-1)
+
+    def log_probs(self, actions):
+        return (
+            super()
+            .log_prob(actions.squeeze(-1))
+            .view(actions.size(0), -1)
+            .sum(-1)
+            .unsqueeze(-1)
+        )
+
+    def mode(self):
+        return self.probs.argmax(dim=-1, keepdim=True)
