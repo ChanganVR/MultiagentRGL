@@ -296,9 +296,11 @@ class RglACTrainer(object):
             # convert action into indices
             self.policy.convert_action_to_index(self.memory)
             self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True)
-        average_epoch_loss = 0
+        average_value_loss = 0
+        average_policy_loss = 0
         for epoch in range(num_epochs):
-            epoch_loss = 0
+            value_loss = 0
+            policy_loss = 0
             logging.debug('{}-th epoch starts'.format(epoch))
             for data in self.data_loader:
                 inputs, values, _, actions, _ = data
@@ -311,26 +313,32 @@ class RglACTrainer(object):
                 loss = loss1 + loss2
                 loss.backward()
                 self.optimizer.step()
-                epoch_loss += loss.data.item()
+                value_loss += loss1.data.item()
+                policy_loss += loss2.data.item()
             logging.debug('{}-th epoch ends'.format(epoch))
-            average_epoch_loss = epoch_loss / len(self.memory)
-            self.writer.add_scalar('IL/average_epoch_loss', average_epoch_loss, epoch)
-            logging.info('Average loss in epoch %d: %.2E', epoch, average_epoch_loss)
+            average_value_loss = value_loss / len(self.memory)
+            average_policy_loss = policy_loss / len(self.memory)
+            self.writer.add_scalar('IL/average_value_loss', average_value_loss, epoch)
+            self.writer.add_scalar('IL/average_policy_loss', average_policy_loss, epoch)
+            logging.info('Average value, policy loss in epoch %d: %.2E, %.2E', epoch,
+                         average_value_loss, average_policy_loss)
 
-        return average_epoch_loss
+        return average_value_loss
 
     def optimize_batch(self, num_batches, episode=None):
         if self.optimizer is None:
             raise ValueError('Learning rate is not set!')
         if self.data_loader is None:
             self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True)
-        losses = 0
+        value_losses = 0
+        policy_losses = 0
+        entropy = 0
         batch_count = 0
         for data in self.data_loader:
             inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
             self.optimizer.zero_grad()
             outputs_vals, outputs_act_feats = self.model(inputs)
-            action_log_probs = FixedCategorical(outputs_act_feats).log_probs(actions)
+            action_log_probs = FixedCategorical(logits=outputs_act_feats).log_probs(actions)
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
             surr1 = ratio * adv_targ
@@ -343,15 +351,19 @@ class RglACTrainer(object):
             loss = loss1 + loss2
             loss.backward()
             self.optimizer.step()
-            losses += loss.data.item()
+            value_losses += loss2.data.item()
+            policy_losses += loss1.data.item()
             batch_count += 1
             if batch_count > num_batches:
                 break
 
-        average_loss = losses / num_batches
-        logging.info('Average loss : %.2E', average_loss)
+        average_value_loss = value_losses / num_batches
+        average_policy_loss = policy_losses / num_batches
+        logging.info('Average value, policy loss : %.2E, %.2E', average_value_loss, average_policy_loss)
+        self.writer.add_scalar('train/average_value_loss', average_value_loss, episode)
+        self.writer.add_scalar('train/average_value_loss', average_policy_loss, episode)
 
-        return average_loss
+        return average_value_loss
 
 
 def pad_batch(batch):

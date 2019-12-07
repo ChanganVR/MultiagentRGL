@@ -179,7 +179,7 @@ class MultiagentExplorer(object):
         
         returns_list = list(reversed(returns_list))
         advantages = torch.FloatTensor([[returns_list[i] - values[i]] for i in range(len(returns_list))]).to(self.device)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-5)
+        # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-5)
 
         for i, t in enumerate(tmp_tuples):
             if imitation_learning:
