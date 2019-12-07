@@ -248,6 +248,100 @@ class VNRLTrainer(object):
         logging.info('Average loss : %.2E', average_loss)
 
         return average_loss
+    
+    
+class RglACTrainer(object):
+    def __init__(self, model, memory, device, policy, batch_size, optimizer_str, writer):
+        """
+        Train the trainable model of a policy
+        """
+        self.model = model
+        self.device = device
+        self.policy = policy
+        self.target_model = None
+        self.criterion_val = nn.MSELoss().to(device)
+        self.criterion_pi = nn.CrossEntropyLoss().to(device)
+        self.softmax = nn.Softmax(dim=1).to(device)
+        self.memory = memory
+        self.data_loader = None
+        self.batch_size = batch_size
+        self.optimizer_str = optimizer_str
+        self.optimizer = None
+        self.writer = writer
+
+        # for value update
+        self.gamma = 0.9
+        self.time_step = 0.25
+        self.v_pref = 1
+
+    def update_target_model(self, target_model):
+        self.target_model = copy.deepcopy(target_model)
+
+    def set_learning_rate(self, learning_rate):
+        if self.optimizer_str == 'Adam':
+            self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        elif self.optimizer_str == 'SGD':
+            self.optimizer = optim.SGD(self.model.parameters(), lr=learning_rate, momentum=0.9)
+        else:
+            raise NotImplementedError
+        logging.info('Lr: {} for parameters {} with {} optimizer'.format(learning_rate, ' '.join(
+            [name for name, param in self.model.named_parameters()]), self.optimizer_str))
+
+    def optimize_epoch(self, num_epochs):
+        if self.optimizer is None:
+            raise ValueError('Learning rate is not set!')
+        if self.data_loader is None:
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True, collate_fn=pad_batch)
+        average_epoch_loss = 0
+        for epoch in range(num_epochs):
+            epoch_loss = 0
+            logging.debug('{}-th epoch starts'.format(epoch))
+            for data in self.data_loader:
+                inputs, values, _, actions, _ = data
+                self.optimizer.zero_grad()
+                outputs_val, outputs_act_feat = self.model(inputs)
+                values = values.to(self.device)
+                actions = actions.to(self.device)
+                loss1 = self.criterion_val(outputs_val, values)
+                loss2 = self.criterion_pi(self.softmax(outputs_act_feat), actions)
+                loss = loss1 + loss2
+                loss.backward()
+                self.optimizer.step()
+                epoch_loss += loss.data.item()
+            logging.debug('{}-th epoch ends'.format(epoch))
+            average_epoch_loss = epoch_loss / len(self.memory)
+            self.writer.add_scalar('IL/average_epoch_loss', average_epoch_loss, epoch)
+            logging.info('Average loss in epoch %d: %.2E', epoch, average_epoch_loss)
+
+        return average_epoch_loss
+
+    def optimize_batch(self, num_batches, episode=None):
+        if self.optimizer is None:
+            raise ValueError('Learning rate is not set!')
+        if self.data_loader is None:
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True, collate_fn=pad_batch)
+        losses = 0
+        batch_count = 0
+        for data in self.data_loader:
+            inputs, _, rewards, next_states = data
+            self.optimizer.zero_grad()
+            outputs = self.model(inputs)
+
+            gamma_bar = pow(self.gamma, self.time_step * self.v_pref)
+            target_values = rewards + gamma_bar * self.target_model(next_states)
+
+            loss = self.criterion(outputs, target_values)
+            loss.backward()
+            self.optimizer.step()
+            losses += loss.data.item()
+            batch_count += 1
+            if batch_count > num_batches:
+                break
+
+        average_loss = losses / num_batches
+        logging.info('Average loss : %.2E', average_loss)
+
+        return average_loss
 
 
 def pad_batch(batch):
