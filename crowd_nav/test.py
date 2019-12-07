@@ -83,7 +83,7 @@ def main(args):
         obs = env.reset(args.phase, args.test_case)
         done = False
         while not done:
-            actions = [agent.act(ob) for agent, ob in zip(agents, obs)]
+            actions = [agent.act(ob)[3] for agent, ob in zip(agents, obs)]
             obs, reward, done, info = env.step(actions)
             rewards.append(reward)
         if args.traj:
