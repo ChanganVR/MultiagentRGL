@@ -182,11 +182,11 @@ class RglActorCritic(Policy):
         The input to the value network is always of shape (batch_size, # humans, rotated joint state length)
         """
         state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
-        _, _, _, action_to_take = self.act(state_tensor)
+        value, action, action_log_probs, action_to_take = self.act(state_tensor)
         if self.phase == 'train':
             self.last_state = self.transform(state)
             
-        return action_to_take[0]
+        return value[0], action[0], action_log_probs[0], action_to_take[0]
     
     def evaluate_actions(self, state_tensor, actions_tensor):
         value, action_feat = self.value_action_predictor(state_tensor)
