@@ -56,12 +56,14 @@ class MultiagentExplorer(object):
                     with torch.no_grad():
                         action_to_take = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
                 else: #for ppo
+                    action_to_take = []
                     for k, (agent, ob) in enumerate(zip(self.agents, obs)):
                         with torch.no_grad():
-                            value, action, action_log_probs, action_to_take = agent.act(ob)
-                        agent_values[k].append(value)
+                            value, action, action_log_probs, _action_to_take = agent.act(ob)
+                        agent_values[k].append(value[0].item())
                         agent_actions[k].append(action)
                         agent_action_log_probs[k].append(action_log_probs)
+                        action_to_take.append(_action_to_take)
                         
                 obs, reward, done, info = self.env.step(action_to_take)
                 for k in range(len(self.agents)):
@@ -91,7 +93,10 @@ class MultiagentExplorer(object):
                 if isinstance(info, ReachGoal) or isinstance(info, Collision):
                     # only add positive(success) or negative(collision) experience in experience set
                     for k in range(len(self.agents)):
-                        self.update_memory(agent_states[k], rewards, imitation_learning=imitation_learning)
+                        if imitation_learning:
+                            self.update_memory(agent_states[k], rewards, agent_actions[k], imitation_learning=imitation_learning)
+                        else:
+                            self.update_memory(agent_states[k], rewards, agent_actions[k], agent_values[k], agent_action_log_probs[k])
 
             cumulative_rewards.append(sum([pow(self.gamma, t * self.time_step * self.v_pref)
                                            * reward for t, reward in enumerate(rewards)]))
@@ -142,17 +147,20 @@ class MultiagentExplorer(object):
                 next_state = self.target_policy.transform(states[i+1])
                 value = sum([pow(self.gamma, (t - i) * self.time_step * self.v_pref) * reward *
                              (1 if t >= i else 0) for t, reward in enumerate(rewards)])
+                action = actions[i]
+                
+                value = torch.Tensor([value]).to(self.device)
+                reward = torch.Tensor([rewards[i]]).to(self.device)
+                self.memory.push((state, value, reward, action, next_state))
             else:
-                next_state = states[i+1]
-                if i == len(states) - 1:
-                    # terminal state
-                    value = reward
-                else:
-                    value = 0
-            value = torch.Tensor([value]).to(self.device)
-            reward = torch.Tensor([rewards[i]]).to(self.device)
+#                 next_state = states[i+1]
+#                 if i == len(states) - 1:
+#                     # terminal state
+#                     value = reward
+#                 else:
+#                     value = 0
+                
 
-            self.memory.push((state, value, reward, next_state))
 
     def log(self, tag_prefix, global_step):
         sr, cr, time, reward, avg_return = self.statistics
