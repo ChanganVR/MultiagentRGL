@@ -12,4 +12,4 @@ policy_factory['lstm_rl'] = LstmRL
 policy_factory['sarl'] = SARL
 policy_factory['gcn'] = GCN
 #policy_factory['model_predictive_rl'] = ModelPredictiveRL
-policy_factory['model_predictive_rl'] = RglActorCritic
+policy_factory['rgl_ppo'] = RglActorCritic

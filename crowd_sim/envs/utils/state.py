@@ -70,8 +70,8 @@ class JointState(object):
             human_states_tensor = human_states_tensor.unsqueeze(0)
 
         if device is not None:
-            robot_state_tensor.to(device)
-            human_states_tensor.to(device)
+            robot_state_tensor = robot_state_tensor.to(device)
+            human_states_tensor = human_states_tensor.to(device)
 
         return robot_state_tensor, human_states_tensor
 

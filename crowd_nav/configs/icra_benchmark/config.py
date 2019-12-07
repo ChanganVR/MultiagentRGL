@@ -115,14 +115,6 @@ class BasePolicyConfig(object):
     gcn.layerwise_graph = True
     gcn.skip_connection = False
 
-    gnn = Config()
-    gnn.multiagent_training = True
-    gnn.node_dim = 32
-    gnn.wr_dims = [64, gnn.node_dim]
-    gnn.wh_dims = [64, gnn.node_dim]
-    gnn.edge_dim = 32
-    gnn.planning_dims = [150, 100, 100, 1]
-
     def __init__(self, debug=False):
         pass
 

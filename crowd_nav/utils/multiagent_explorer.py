@@ -52,9 +52,12 @@ class MultiagentExplorer(object):
             agent_action_log_probs = [[] for _ in range(len(self.agents))]
             rewards = []
             while not done:
-                if imitation_learning or phase in ['val', 'test']:
+                # TODO: ORCA as policy in test
+                if imitation_learning:
                     with torch.no_grad():
                         action_to_take = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
+                    for k in range(len(self.agents)):
+                        agent_actions[k].append(action_to_take[k])
                 else: #for ppo
                     action_to_take = []
                     for k, (agent, ob) in enumerate(zip(self.agents, obs)):
@@ -90,7 +93,7 @@ class MultiagentExplorer(object):
                 raise ValueError('Invalid end signal from environment')
 
             if update_memory:
-                if isinstance(info, ReachGoal) or isinstance(info, Collision):
+                if isinstance(info, ReachGoal) or isinstance(info, Collision) or isinstance(info, Timeout):
                     # only add positive(success) or negative(collision) experience in experience set
                     for k in range(len(self.agents)):
                         if imitation_learning:
@@ -140,7 +143,8 @@ class MultiagentExplorer(object):
         _gamma = pow(self.gamma, self.time_step * self.v_pref)
         gae = 0
         returns_list = []
-        
+
+        tmp_tuples = list()
         for i, state in reversed(list(enumerate(states[:-1]))):
             reward = rewards[i]
            
@@ -155,7 +159,7 @@ class MultiagentExplorer(object):
                 
                 value = torch.Tensor([value]).to(self.device)
                 reward = torch.Tensor([rewards[i]]).to(self.device)
-                self.memory.push((state, value, reward, action, next_state))
+                tmp_tuples.append((state, value, reward, action, next_state))
             else:
 #                 next_state = states[i+1]
 #                 if i == len(states) - 1:
@@ -171,16 +175,20 @@ class MultiagentExplorer(object):
                 reward_to_go = torch.Tensor([reward_to_go]).to(self.device)
                 value = torch.Tensor([values[i]]).to(self.device)
                 reward = torch.Tensor([rewards[i]]).to(self.device)
-                self.memory.push((state, value, reward, action[i], reward_to_go, action_log_probs[i]))
+                tmp_tuples.append((state, value, reward, actions[i], reward_to_go, action_log_probs[i]))
         
-        returns_list = reversed(returns_list)
+        returns_list = list(reversed(returns_list))
         advantages = torch.FloatTensor([[returns_list[i] - values[i]] for i in range(len(returns_list))]).to(self.device)
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-5)
-        
-        for i in range(len(returns_list)):
-            self.memeory[i] = self.memeory[i] + (advantages[i],)
-                
 
+        for i, t in enumerate(tmp_tuples):
+            if imitation_learning:
+                self.memory.push(t)
+            else:
+                self.memory.push(t + (advantages[i],))
+
+        # for i in range(len(returns_list)):
+        #     self.memory.memory[i] = self.memory.memory[i] + (advantages[i],)
 
     def log(self, tag_prefix, global_step):
         sr, cr, time, reward, avg_return = self.statistics

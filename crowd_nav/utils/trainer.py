@@ -273,6 +273,8 @@ class RglACTrainer(object):
         self.gamma = 0.9
         self.time_step = 0.25
         self.v_pref = 1
+        self.clip_param = 0.1
+        self.value_loss_coef = 0.5
 
     def update_target_model(self, target_model):
         self.target_model = copy.deepcopy(target_model)
@@ -291,7 +293,9 @@ class RglACTrainer(object):
         if self.optimizer is None:
             raise ValueError('Learning rate is not set!')
         if self.data_loader is None:
-            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True, collate_fn=pad_batch)
+            # convert action into indices
+            self.policy.convert_action_to_index(self.memory)
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True)
         average_epoch_loss = 0
         for epoch in range(num_epochs):
             epoch_loss = 0
@@ -301,7 +305,7 @@ class RglACTrainer(object):
                 self.optimizer.zero_grad()
                 outputs_val, outputs_act_feat = self.model(inputs)
                 values = values.to(self.device)
-                actions = actions.to(self.device)
+                actions = actions.to(self.device).squeeze()
                 loss1 = self.criterion_val(outputs_val, values)
                 loss2 = self.criterion_pi(self.softmax(outputs_act_feat), actions)
                 loss = loss1 + loss2
@@ -319,21 +323,23 @@ class RglACTrainer(object):
         if self.optimizer is None:
             raise ValueError('Learning rate is not set!')
         if self.data_loader is None:
-            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True, collate_fn=pad_batch)
+            self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True)
         losses = 0
         batch_count = 0
         for data in self.data_loader:
-            inputs, values, rewards, actions, returns, old_action_log_probs, adv_args = data
+            inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
             self.optimizer.zero_grad()
             outputs_vals, outputs_act_feats = self.model(inputs)
             action_log_probs = FixedCategorical(outputs_act_feats).log_probs(actions)
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
-            surr1 = ratio * adv_targs
+            surr1 = ratio * adv_targ
             surr2 = torch.clamp(ratio, 1.0 - self.clip_param,
-                                    1.0 + self.clip_param) * adv_targs
+                                    1.0 + self.clip_param) * adv_targ
             loss1 = -torch.min(surr1, surr2).mean()
-            loss2 = self.criterion_val(outputs_vals, values)
+            loss2 = self.criterion_val(outputs_vals, values) * 0.5 * self.value_loss_coef
+            # TODO:
+            # loss3 = dist_entropy * self.entropy_coef
             loss = loss1 + loss2
             loss.backward()
             self.optimizer.step()
@@ -368,6 +374,7 @@ def pad_batch(batch):
     next_states = sort_states(3)
 
     return states, values, rewards, next_states
+
 
 class FixedCategorical(torch.distributions.Categorical):
     def sample(self):

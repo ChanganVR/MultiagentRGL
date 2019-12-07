@@ -145,9 +145,14 @@ def main(args):
     trainer.update_target_model(model)
 
     # reinforcement learning
+    # TODO: add it to config
+    # update memory
+    memory = ReplayMemory(200)
+    trainer = RglACTrainer(model, memory, device, policy, batch_size, optimizer, writer)
+    trainer.set_learning_rate(rl_learning_rate)
+    explorer.memory = memory
     for agent in agents:
         agent.set_policy(policy)
-    trainer.set_learning_rate(rl_learning_rate)
 
     episode = 0
     best_val_reward = -1
@@ -210,8 +215,8 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Parse configuration file')
-    parser.add_argument('--policy', type=str, default='rgl')
-    parser.add_argument('--config', type=str, default='configs/icra_benchmark/rgl.py')
+    parser.add_argument('--policy', type=str, default='rgl_ppo')
+    parser.add_argument('--config', type=str, default='configs/icra_benchmark/rgl_ppo.py')
     parser.add_argument('--output_dir', type=str, default='data/output')
     parser.add_argument('--overwrite', default=False, action='store_true')
     parser.add_argument('--weights', type=str)

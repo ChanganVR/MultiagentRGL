@@ -1,8 +1,5 @@
-import logging
-
-import torch
 import numpy as np
-from numpy.linalg import norm
+import torch
 
 from crowd_sim.envs.policy.policy import Policy
 from crowd_sim.envs.utils.action import ActionRot, ActionXY
@@ -15,7 +12,7 @@ from crowd_nav.policy.value_action_predictor import ValueActionPredictor
 class RglActorCritic(Policy):
     def __init__(self):
         super().__init__()
-        self.name = 'RglActorCritic'
+        self.name = 'rgl_ppo'
         self.trainable = True
         self.multiagent_training = True
         self.kinematics = None
@@ -32,31 +29,15 @@ class RglActorCritic(Policy):
         self.robot_state_dim = 9
         self.human_state_dim = 5
         self.v_pref = 1
-        self.share_graph_model = None
         self.value_action_predictor = None
-        self.do_action_clip = None
-        self.sparse_search = None
-        self.sparse_speed_samples = 2
-        self.sparse_rotation_samples = 8
-        self.action_group_index = []
         self.traj = None
 
     def configure(self, config):
         self.set_common_parameters(config)
-        self.do_action_clip = config.model_predictive_rl.do_action_clip        
-        self.share_graph_model = config.model_predictive_rl.share_graph_model
-
-        if self.share_graph_model:
-            graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
-            self.value_action_predictor = ValueActionPredictor(config, graph_model)            
-            self.model = [graph_model, self.value_action_predictor.value_network, \
-                          self.value_action_predictor.action_network]
-        else:
-            graph_model1 = RGL(config, self.robot_state_dim, self.human_state_dim)
-            graph_model2 = RGL(config, self.robot_state_dim, self.human_state_dim)
-            self.value_action_predictor = ValueActionPredictor(config, graph_model1, graph_model2, False)            
-            self.model = [graph_model1, graph_model2, self.value_action_predictor.value_network, \
-                          self.value_action_predictor.action_network]
+        graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
+        self.value_action_predictor = ValueActionPredictor(config, graph_model)
+        self.model = [graph_model, self.value_action_predictor.value_network, \
+                      self.value_action_predictor.action_network]
 
     def set_common_parameters(self, config):
         self.gamma = config.rl.gamma
@@ -76,7 +57,6 @@ class RglActorCritic(Policy):
 
     def set_time_step(self, time_step):
         self.time_step = time_step
-        self.state_predictor.time_step = time_step
 
     def get_normalized_gamma(self):
         return pow(self.gamma, self.time_step * self.v_pref)
@@ -85,34 +65,19 @@ class RglActorCritic(Policy):
         return self.value_action_predictor
 
     def get_state_dict(self):
-        if self.share_graph_model:
-            return {
-                'graph_model': self.value_action_predictor.graph_model.state_dict(),
-                'value_network': self.value_action_predictor.value_network.state_dict(),
-                'action_network': self.value_action_predictor.action_network.state_dict()
-            }
-        else:
-            return {
-                'graph_model1': self.value_action_predictor.graph_model_val.state_dict(),
-                'graph_model2': self.value_action_predictor.graph_model_act.state_dict(),
-                'value_network': self.value_action_predictor.value_network.state_dict(),
-                'action_network': self.value_action_predictor.action_network.state_dict()
-            }
-
+        return {
+            'graph_model': self.value_action_predictor.graph_model.state_dict(),
+            'value_network': self.value_action_predictor.value_network.state_dict(),
+            'action_network': self.value_action_predictor.action_network.state_dict()
+        }
 
     def get_traj(self):
         return self.traj
 
-    def load_state_dict(self, state_dict):        
-        if self.share_graph_model:
-            self.value_action_predictor.graph_model.load_state_dict(state_dict['graph_model'])
-        else:
-            self.value_action_predictor.graph_model_val.load_state_dict(state_dict['graph_model1'])
-            self.value_action_predictor.graph_model_act.load_state_dict(state_dict['graph_model2'])
-
+    def load_state_dict(self, state_dict):
+        self.value_action_predictor.graph_model.load_state_dict(state_dict['graph_model'])
         self.value_action_predictor.value_network.load_state_dict(state_dict['value_network'])
         self.value_action_predictor.action_network.load_state_dict(state_dict['action_network'])
-
 
     def save_model(self, file):
         torch.save(self.get_state_dict(), file)
@@ -134,21 +99,7 @@ class RglActorCritic(Policy):
 
         action_space = [ActionXY(0, 0) if holonomic else ActionRot(0, 0)]
         for j, speed in enumerate(speeds):
-            if j == 0:
-                # index for action (0, 0)
-                self.action_group_index.append(0)
-            # only two groups in speeds
-            if j < 3:
-                speed_index = 0
-            else:
-                speed_index = 1
-
             for i, rotation in enumerate(rotations):
-                rotation_index = i // 2
-
-                action_index = speed_index * self.sparse_rotation_samples + rotation_index
-                self.action_group_index.append(action_index)
-
                 if holonomic:
                     action_space.append(ActionXY(speed * np.cos(rotation), speed * np.sin(rotation)))
                 else:
@@ -158,7 +109,37 @@ class RglActorCritic(Policy):
         self.rotations = rotations
         self.action_space = action_space
 
-    def act(self, state_tensor): #state is a batch of tensors rather than a joint state
+    def convert_action_to_index(self, memory):
+        if self.action_space is None:
+            self.build_action_space(v_pref=1)
+
+        for i, mem_tuple in enumerate(memory.memory):
+            action = mem_tuple[3]
+            min_index = 0
+            min_distance = 10000
+            for j, a in enumerate(self.action_space):
+                distance = np.linalg.norm(np.array(action) - np.array(a))
+                if distance < min_distance:
+                    min_distance = distance
+                    min_index = j
+            action_index = torch.LongTensor([min_index]).to(self.device)
+            new_tuple = mem_tuple[0], mem_tuple[1], mem_tuple[2], action_index, mem_tuple[4]
+            memory.memory[i] = new_tuple
+
+    def act(self, state_tensor): # state is a batch of tensors rather than a joint state
+        value, action_feat = self.value_action_predictor(state_tensor)
+        dist = FixedCategorical(logits=action_feat)
+        action = dist.sample()
+        action_log_probs = dist.log_probs(action)
+        action_to_take = self.action_index_to_action(action)
+        
+        return value, action, action_log_probs, action_to_take
+    
+    def predict(self, state): # used in Agent class; state must be a joint state
+        """
+        A base class for all methods that takes pairwise joint state as input to value network.
+        The input to the value network is always of shape (batch_size, # humans, rotated joint state length)
+        """
         if self.phase is None or self.device is None:
             raise AttributeError('Phase, device attributes have to be set!')
         if self.phase == 'train' and self.epsilon is None:
@@ -167,20 +148,7 @@ class RglActorCritic(Policy):
             return ActionXY(0, 0) if self.kinematics == 'holonomic' else ActionRot(0, 0)
         if self.action_space is None:
             self.build_action_space(state.robot_state.v_pref)
-            
-        value, action_feat = self.value_action_predictor(state_tensor)
-        dist = FixedCategorical(action_feat)
-        action = dist.sample()
-        action_log_probs = dist.log_probs(action)
-        action_to_take = self.action_index_to_action(action)
-        
-        return value, action, action_log_probs, action_to_take
-    
-    def predict(self, state): #used in Agent class; state must be a joint state
-        """
-        A base class for all methods that takes pairwise joint state as input to value network.
-        The input to the value network is always of shape (batch_size, # humans, rotated joint state length)
-        """
+
         state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
         value, action, action_log_probs, action_to_take = self.act(state_tensor)
         if self.phase == 'train':
@@ -190,7 +158,7 @@ class RglActorCritic(Policy):
     
     def evaluate_actions(self, state_tensor, actions_tensor):
         value, action_feat = self.value_action_predictor(state_tensor)
-        dist = FixedCategorical(action_feat)
+        dist = FixedCategorical(logits=action_feat)
         action_log_probs = dist.log_probs(actions_tensor)
         
         return value, action_log_probs
@@ -199,9 +167,8 @@ class RglActorCritic(Policy):
         action_to_take = []
         batch_size = list(indices.size())[0]
         for i in range(batch_size):
-            action_to_take.append(self.action_space[indices[i,0].item()])
+            action_to_take.append(self.action_space[indices[i, 0].item()])
         return action_to_take 
-    
 
     def transform(self, state):
         """

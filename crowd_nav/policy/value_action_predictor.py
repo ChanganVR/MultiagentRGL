@@ -14,9 +14,9 @@ class ValueActionPredictor(nn.Module):
             assert graph_model_act is not None, "void graph_model_act"
             self.graph_model_act = graph_model_act
 
-        self.value_network = mlp(config.gcn.X_dim, config.model_predictive_rl.value_network_dims)
-        self.action_network = mlp(config.gcn.X_dim, config.model_predictive_rl.value_network_dims[:-1] +
-                                  [config.action_space.rotation_samples * config.action_space.speed_samples]) 
+        self.value_network = mlp(config.gcn.X_dim, config.rgl_ppo.value_network_dims)
+        self.action_network = mlp(config.gcn.X_dim, config.rgl_ppo.value_network_dims[:-1] +
+                                  [config.action_space.rotation_samples * config.action_space.speed_samples + 1])
 
     def forward(self, state):
         """ Embed state into a latent space. Take the first row of the feature matrix as state representation.
