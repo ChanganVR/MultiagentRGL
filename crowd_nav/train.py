@@ -11,7 +11,7 @@ import git
 import re
 from tensorboardX import SummaryWriter
 from crowd_sim.envs.utils.robot import Robot
-from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer
+from crowd_nav.utils.trainer import VNRLTrainer, MPRLTrainer, RglACTrainer
 from crowd_nav.utils.memory import ReplayMemory
 from crowd_nav.utils.explorer import Explorer
 from crowd_nav.utils.multiagent_explorer import MultiagentExplorer
@@ -118,7 +118,7 @@ def main(args):
     model = policy.get_model()
     batch_size = train_config.trainer.batch_size
     optimizer = train_config.trainer.optimizer
-    trainer = VNRLTrainer(model, memory, device, policy, batch_size, optimizer, writer)
+    trainer = RglACTrainer(model, memory, device, policy, batch_size, optimizer, writer)
     explorer = MultiagentExplorer(env, device, writer, memory, policy.gamma, target_policy=policy)
 
     if os.path.exists(il_weight_file):
