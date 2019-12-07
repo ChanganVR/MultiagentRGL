@@ -139,6 +139,7 @@ class MultiagentExplorer(object):
         
         _gamma = pow(self.gamma, self.time_step * self.v_pref)
         gae = 0
+        returns_list = []
         
         for i, state in reversed(list(enumerate(states[:-1]))):
             reward = rewards[i]
@@ -165,11 +166,19 @@ class MultiagentExplorer(object):
                 delta = rewards[i] + _gamma * values[i + 1] - values[i]
                 gae = delta + _gamma * gae  # * gae_lambda
                 reward_to_go = gae + values[i] # i.e., return
+                returns_list.append(reward_to_go)
                 
                 reward_to_go = torch.Tensor([reward_to_go]).to(self.device)
                 value = torch.Tensor([values[i]]).to(self.device)
                 reward = torch.Tensor([rewards[i]]).to(self.device)
                 self.memory.push((state, value, reward, action[i], reward_to_go, action_log_probs[i]))
+        
+        returns_list = reversed(returns_list)
+        advantages = torch.FloatTensor([[returns_list[i] - values[i]] for i in range(len(returns_list))]).to(self.device)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-5)
+        
+        for i in range(len(returns_list)):
+            self.memeory[i] = self.memeory[i] + (advantages[i],)
                 
 
 
