@@ -200,10 +200,10 @@ class MultiagentSim(gym.Env):
             reward = 0
             done = True
             info = Timeout()
-        # elif collision:
-        #     reward = self.collision_penalty
-        #     done = True
-        #     info = Collision()
+        elif collision:
+            reward = self.collision_penalty
+            done = True
+            info = Collision()
         elif all(reaching_goals):
             reward = self.success_reward
             done = True
@@ -452,56 +452,7 @@ class MultiagentSim(gym.Env):
             time = plt.text(0.4, 0.9, 'Time: {}'.format(0), fontsize=16, transform=ax.transAxes)
             ax.add_artist(time)
 
-            # # visualize attention scores
-            # # if hasattr(self.robot.policy, 'get_attention_weights'):
-            # #     attention_scores = [
-            # #         plt.text(-5.5, 5 - 0.5 * i, 'Human {}: {:.2f}'.format(i + 1, self.attention_weights[0][i]),
-            # #                  fontsize=16) for i in range(len(self.humans))]
-            #
-            # # compute orientation in each step and use arrow to show the direction
-            # radius = self.robot.radius
-            # orientations = []
-            # for i in range(self.human_num + 1):
-            #     orientation = []
-            #     for state in self.states:
-            #         agent_state = state[0] if i == 0 else state[1][i - 1]
-            #         if self.robot.kinematics == 'unicycle' and i == 0:
-            #             direction = (
-            #             (agent_state.px, agent_state.py), (agent_state.px + radius * np.cos(agent_state.theta),
-            #                                                agent_state.py + radius * np.sin(agent_state.theta)))
-            #         else:
-            #             theta = np.arctan2(agent_state.vy, agent_state.vx)
-            #             direction = ((agent_state.px, agent_state.py), (agent_state.px + radius * np.cos(theta),
-            #                                                             agent_state.py + radius * np.sin(theta)))
-            #         orientation.append(direction)
-            #     orientations.append(orientation)
-            #     if i == 0:
-            #         arrow_color = 'black'
-            #         arrows = [patches.FancyArrowPatch(*orientation[0], color=arrow_color, arrowstyle=arrow_style)]
-            #     else:
-            #         arrows.extend(
-            #             [patches.FancyArrowPatch(*orientation[0], color=human_colors[i - 1], arrowstyle=arrow_style)])
-            #
-            # for arrow in arrows:
-            #     ax.add_artist(arrow)
             global_step = 0
-
-            # if len(self.trajs) != 0:
-            #     human_future_positions = []
-            #     human_future_circles = []
-            #     for traj in self.trajs:
-            #         human_future_position = [[tensor_to_joint_state(traj[step+1][0]).human_states[i].position
-            #                                   for step in range(self.robot.policy.planning_depth)]
-            #                                  for i in range(self.human_num)]
-            #         human_future_positions.append(human_future_position)
-            #
-            #     for i in range(self.human_num):
-            #         circles = []
-            #         for j in range(self.robot.policy.planning_depth):
-            #             circle = plt.Circle(human_future_positions[0][i][j], self.humans[0].radius/(1.7+j), fill=False, color=cmap(i))
-            #             ax.add_artist(circle)
-            #             circles.append(circle)
-            #         human_future_circles.append(circles)
 
             def update(frame_num):
                 nonlocal global_step

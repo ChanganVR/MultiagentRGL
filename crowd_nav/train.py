@@ -133,6 +133,7 @@ def main(args):
 
         il_policy = policy_factory[il_policy]()
         il_policy.multiagent_training = policy.multiagent_training
+        il_policy.safety_space = train_config.imitation_learning.safety_space
         for agent in agents:
             agent.set_policy(il_policy)
         explorer.run_episodes(il_episodes, 'train', update_memory=True, imitation_learning=True)

@@ -100,7 +100,10 @@ def main(args):
             test_angle_seeds = np.array(env.test_scene_seeds)
             b = [i * 0.01 for i in range(101)]
             n, bins, patches = plt.hist(test_angle_seeds, b, facecolor='g')
-            plt.savefig(os.path.join(args.model_dir, 'test_scene_hist.png'))
+            if args.model_dir is not None:
+                plt.savefig(os.path.join(args.model_dir, 'test_scene_hist.png'))
+            else:
+                plt.show()
             plt.close()
 
 
@@ -124,7 +127,7 @@ if __name__ == '__main__':
     parser.add_argument('--human_num', type=int, default=None)
     parser.add_argument('--safety_space', type=float, default=0.2)
     parser.add_argument('--test_scenario', type=str, default=None)
-    parser.add_argument('--plot_test_scenarios_hist', default=True, action='store_true')
+    parser.add_argument('--plot_test_scenarios_hist', default=False, action='store_true')
 
     sys_args = parser.parse_args()
 
