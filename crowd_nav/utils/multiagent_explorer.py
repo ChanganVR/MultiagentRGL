@@ -47,12 +47,26 @@ class MultiagentExplorer(object):
             obs = self.env.reset(phase)
             done = False
             agent_states = [[] for _ in range(len(self.agents))]
+            agent_values = [[] for _ in range(len(self.agents))]
+            agent_actions = [[] for _ in range(len(self.agents))]
+            agent_action_log_probs = [[] for _ in range(len(self.agents))]
             rewards = []
             while not done:
-                actions = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
-                obs, reward, done, info = self.env.step(actions)
+                if imitation_learning or phase in ['val', 'test']:
+                    with torch.no_grad():
+                        action_to_take = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
+                else: #for ppo
+                    for k, (agent, ob) in enumerate(zip(self.agents, obs)):
+                        with torch.no_grad():
+                            value, action, action_log_probs, action_to_take = agent.act(ob)
+                        agent_values[k].append(value)
+                        agent_actions[k].append(action)
+                        agent_action_log_probs[k].append(action_log_probs)
+                        
+                obs, reward, done, info = self.env.step(action_to_take)
                 for k in range(len(self.agents)):
                     agent_states[k].append(self.agents[k].last_state)
+
                 rewards.append(reward)
 
                 if isinstance(info, Discomfort):
@@ -77,7 +91,7 @@ class MultiagentExplorer(object):
                 if isinstance(info, ReachGoal) or isinstance(info, Collision):
                     # only add positive(success) or negative(collision) experience in experience set
                     for k in range(len(self.agents)):
-                        self.update_memory(agent_states[k], rewards, imitation_learning)
+                        self.update_memory(agent_states[k], rewards, imitation_learning=imitation_learning)
 
             cumulative_rewards.append(sum([pow(self.gamma, t * self.time_step * self.v_pref)
                                            * reward for t, reward in enumerate(rewards)]))
@@ -114,7 +128,7 @@ class MultiagentExplorer(object):
 
         return self.statistics
 
-    def update_memory(self, states, rewards, imitation_learning=False):
+    def update_memory(self, states, rewards, actions, values=None, action_log_probs=None, imitation_learning=False):
         if self.memory is None or self.gamma is None:
             raise ValueError('Memory or gamma value is not set!')
         
