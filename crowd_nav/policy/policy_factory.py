@@ -11,5 +11,5 @@ policy_factory['cadrl'] = CADRL
 policy_factory['lstm_rl'] = LstmRL
 policy_factory['sarl'] = SARL
 policy_factory['gcn'] = GCN
-policy_factory['model_predictive_rl'] = ModelPredictiveRL
-policy_factory['rgl_actor_critic'] = RglActorCritic
+#policy_factory['model_predictive_rl'] = ModelPredictiveRL
+policy_factory['model_predictive_rl'] = RglActorCritic
