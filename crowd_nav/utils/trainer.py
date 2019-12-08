@@ -306,9 +306,8 @@ class RglACTrainer(object):
             for data in self.data_loader:
                 inputs, values, _, actions, _ = data
                 self.optimizer.zero_grad()
-                outputs_val, outputs_act_feat = self.model(inputs)
-                mu, cov = convert_to_mean_and_cov(outputs_act_feat)
-                action_log_probs = MultivariateNormal(mu, cov).log_probs(actions)
+                outputs_val, outputs_mu, outputs_cov = self.model(inputs)                
+                action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_probs(actions)
                 values = values.to(self.device)
                 actions = actions.to(self.device).squeeze()
                 loss1 = self.criterion_val(outputs_val, values)
@@ -340,9 +339,8 @@ class RglACTrainer(object):
         for data in self.data_loader:
             inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
             self.optimizer.zero_grad()
-            outputs_vals, outputs_act_feats = self.model(inputs)
-            mu, cov = convert_to_mean_and_cov(outputs_act_feats)
-            action_log_probs = MultivariateNormal(mu, cov).log_prob(actions)
+            outputs_vals, outputs_mu, outputs_cov = self.model(inputs)            
+            action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
             surr1 = ratio * adv_targ
@@ -390,12 +388,4 @@ def pad_batch(batch):
     next_states = sort_states(3)
 
     return states, values, rewards, next_states
-
-
-def convert_to_mean_and_cov(action_feats): # action_feats: (batch, 5) 5->(mu_x, mu_y, s_x^2, s_y^2, s_xy)
-    mu = action_feats[:,:2]
-    cov = torch.cat((action_feats[:,2:3], action_feats[:,-1:], action_feats[:,-1:], action_feats[:,3:4]), dim=-1)\
-               .view(-1,2,2)
-    return mu, cov
-
 
