@@ -7,6 +7,7 @@ from crowd_sim.envs.utils.state import tensor_to_joint_state
 from crowd_sim.envs.utils.utils import point_to_segment_dist
 from crowd_nav.policy.graph_model import RGL
 from crowd_nav.policy.value_action_predictor import ValueActionPredictor
+from torch.distributions.distribution.Distribution import MultivariateNormal
 
 
 class RglActorCritic(Policy):
@@ -86,54 +87,14 @@ class RglActorCritic(Policy):
         checkpoint = torch.load(file)
         self.load_state_dict(checkpoint)
 
-    def build_action_space(self, v_pref):
-        """
-        Action space consists of 25 uniformly sampled actions in permitted range and 25 randomly sampled actions.
-        """
-        holonomic = True if self.kinematics == 'holonomic' else False
-        speeds = [(np.exp((i + 1) / self.speed_samples) - 1) / (np.e - 1) * v_pref for i in range(self.speed_samples)]
-        if holonomic:
-            rotations = np.linspace(0, 2 * np.pi, self.rotation_samples, endpoint=False)
-        else:
-            rotations = np.linspace(-self.rotation_constraint, self.rotation_constraint, self.rotation_samples)
-
-        action_space = [ActionXY(0, 0) if holonomic else ActionRot(0, 0)]
-        for j, speed in enumerate(speeds):
-            for i, rotation in enumerate(rotations):
-                if holonomic:
-                    action_space.append(ActionXY(speed * np.cos(rotation), speed * np.sin(rotation)))
-                else:
-                    action_space.append(ActionRot(speed, rotation))
-
-        self.speeds = speeds
-        self.rotations = rotations
-        self.action_space = action_space
-
-    def convert_action_to_index(self, memory):
-        if self.action_space is None:
-            self.build_action_space(v_pref=1)
-
-        for i, mem_tuple in enumerate(memory.memory):
-            action = mem_tuple[3]
-            min_index = 0
-            min_distance = 10000
-            for j, a in enumerate(self.action_space):
-                distance = np.linalg.norm(np.array(action) - np.array(a))
-                if distance < min_distance:
-                    min_distance = distance
-                    min_index = j
-            action_index = torch.LongTensor([min_index]).to(self.device)
-            new_tuple = mem_tuple[0], mem_tuple[1], mem_tuple[2], action_index, mem_tuple[4]
-            memory.memory[i] = new_tuple
-
     def act(self, state_tensor): # state is a batch of tensors rather than a joint state
-        value, action_feat = self.value_action_predictor(state_tensor)
-        dist = FixedCategorical(logits=action_feat)
-        action = dist.sample()
-        action_log_probs = dist.log_probs(action)
-        action_to_take = self.action_index_to_action(action)
+        value, mu, cov = self.value_action_predictor(state_tensor)
+        dist = MultivariateNormal(mu, cov)
+        actions = dist.sample()
+        action_log_probs = dist.log_prob(actions)
+        action_to_take = [ActionXY(action[0], action[1]) for action in actions.item()] # TODO: check correctness
         
-        return value, action, action_log_probs, action_to_take
+        return value, actions, action_log_probs, action_to_take
     
     def predict(self, state): # used in Agent class; state must be a joint state
         """
@@ -146,8 +107,6 @@ class RglActorCritic(Policy):
             raise AttributeError('Epsilon attribute has to be set in training phase')
         # if self.reach_destination(state):
         #     return ActionXY(0, 0) if self.kinematics == 'holonomic' else ActionRot(0, 0)
-        if self.action_space is None:
-            self.build_action_space(state.robot_state.v_pref)
 
         state_tensor = state.to_tensor(add_batch_size=True, device=self.device)
         value, action, action_log_probs, action_to_take = self.act(state_tensor)
@@ -157,18 +116,12 @@ class RglActorCritic(Policy):
         return value[0], action[0], action_log_probs[0], action_to_take[0]
     
     def evaluate_actions(self, state_tensor, actions_tensor):
-        value, action_feat = self.value_action_predictor(state_tensor)
-        dist = FixedCategorical(logits=action_feat)
-        action_log_probs = dist.log_probs(actions_tensor)
+        value, mu, cov = self.value_action_predictor(state_tensor)
+        dist = MultivariateNormal(mu, cov)
+        action_log_probs = dist.log_prob(actions_tensor)
         
         return value, action_log_probs
     
-    def action_index_to_action(self, indices): #indices: (batch_size, 1) tensor
-        action_to_take = []
-        batch_size = list(indices.size())[0]
-        for i in range(batch_size):
-            action_to_take.append(self.action_space[indices[i, 0].item()])
-        return action_to_take 
 
     def transform(self, state):
         """
@@ -183,18 +136,3 @@ class RglActorCritic(Policy):
         return robot_state_tensor, human_states_tensor
     
     
-class FixedCategorical(torch.distributions.Categorical):
-    def sample(self):
-        return super().sample().unsqueeze(-1)
-
-    def log_probs(self, actions):
-        return (
-            super()
-            .log_prob(actions.squeeze(-1))
-            .view(actions.size(0), -1)
-            .sum(-1)
-            .unsqueeze(-1)
-        )
-
-    def mode(self):
-        return self.probs.argmax(dim=-1, keepdim=True)
