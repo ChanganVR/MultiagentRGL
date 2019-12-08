@@ -294,8 +294,7 @@ class RglACTrainer(object):
         if self.optimizer is None:
             raise ValueError('Learning rate is not set!')
         if self.data_loader is None:
-            # convert action into indices
-            self.policy.convert_action_to_index(self.memory)
+            # convert action into indices            
             self.data_loader = DataLoader(self.memory, self.batch_size, shuffle=True)
         average_value_loss = 0
         average_policy_loss = 0
@@ -339,8 +338,10 @@ class RglACTrainer(object):
         for data in self.data_loader:
             inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
             self.optimizer.zero_grad()
-            outputs_vals, outputs_mu, outputs_cov = self.model(inputs)            
-            action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)
+            outputs_vals, outputs_mu, outputs_cov = self.model(inputs)    
+            dist = MultivariateNormal(outputs_mu, outputs_cov)
+            action_log_probs = dist.log_prob(actions)
+            dist_entropy = dist.entropy().mean() 
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
             surr1 = ratio * adv_targ
@@ -349,8 +350,8 @@ class RglACTrainer(object):
             loss1 = -torch.min(surr1, surr2).mean()
             loss2 = self.criterion_val(outputs_vals, values) * 0.5 * self.value_loss_coef
             # TODO:
-            # loss3 = dist_entropy * self.entropy_coef
-            loss = loss1 + loss2
+            loss3 = dist_entropy * self.entropy_coef  # TODO: entropy_coef = 0.01
+            loss = loss1 + loss2 + loss3
             loss.backward()
             self.optimizer.step()
             value_losses += loss2.data.item()
