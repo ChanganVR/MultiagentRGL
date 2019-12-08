@@ -7,7 +7,7 @@ from crowd_sim.envs.utils.state import tensor_to_joint_state
 from crowd_sim.envs.utils.utils import point_to_segment_dist
 from crowd_nav.policy.graph_model import RGL
 from crowd_nav.policy.value_action_predictor import ValueActionPredictor
-from torch.distributions.distribution.Distribution import MultivariateNormal
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 
 class RglActorCritic(Policy):
@@ -92,7 +92,7 @@ class RglActorCritic(Policy):
         dist = MultivariateNormal(mu, cov)
         actions = dist.sample()
         action_log_probs = dist.log_prob(actions)
-        action_to_take = [ActionXY(action[0], action[1]) for action in actions.item()] # TODO: check correctness
+        action_to_take = [ActionXY(action[0], action[1]) for action in actions.cpu().numpy()]
         
         return value, actions, action_log_probs, action_to_take
     
@@ -115,13 +115,12 @@ class RglActorCritic(Policy):
             
         return value[0], action[0], action_log_probs[0], action_to_take[0]
     
-    def evaluate_actions(self, state_tensor, actions_tensor):
-        value, mu, cov = self.value_action_predictor(state_tensor)
-        dist = MultivariateNormal(mu, cov)
-        action_log_probs = dist.log_prob(actions_tensor)
-        
-        return value, action_log_probs
-    
+    # def evaluate_actions(self, state_tensor, actions_tensor):
+    #     value, mu, cov = self.value_action_predictor(state_tensor)
+    #     dist = MultivariateNormal(mu, cov)
+    #     action_log_probs = dist.log_prob(actions_tensor)
+    #
+    #     return value, action_log_probs
 
     def transform(self, state):
         """
@@ -134,5 +133,4 @@ class RglActorCritic(Policy):
             to(self.device)
 
         return robot_state_tensor, human_states_tensor
-    
-    
+

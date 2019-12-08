@@ -1,11 +1,14 @@
 import os
 import logging
 import copy
+
 import torch
+import numpy as np
 from tqdm import tqdm
+
 from crowd_sim.envs.utils.info import *
 
-########
+
 class MultiagentExplorer(object):
     def __init__(self, env, device, writer, memory=None, gamma=None, target_policy=None):
         self.env = env
@@ -155,8 +158,8 @@ class MultiagentExplorer(object):
                 next_state = self.target_policy.transform(states[i+1])
                 value = sum([pow(self.gamma, (t - i) * self.time_step * self.v_pref) * reward *
                              (1 if t >= i else 0) for t, reward in enumerate(rewards)])
-                action = actions[i]
-                
+
+                action = torch.from_numpy(np.array(actions[i])).to(self.device)
                 value = torch.Tensor([value]).to(self.device)
                 reward = torch.Tensor([rewards[i]]).to(self.device)
                 tmp_tuples.append((state, value, reward, action, next_state))

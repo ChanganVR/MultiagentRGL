@@ -46,7 +46,6 @@ class RGL(nn.Module):
         elif self.similarity_function == 'concatenation':
             self.w_a = mlp(2 * X_dim, [2 * X_dim, 1], last_relu=True)
 
-        # TODO: try other dim size
         embedding_dim = self.X_dim
         self.Ws = torch.nn.ParameterList()
         for i in range(self.num_layer):

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.distributions.distribution.Distribution import MultivariateNormal
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 
 class MPRLTrainer(object):
@@ -276,6 +276,7 @@ class RglACTrainer(object):
         self.v_pref = 1
         self.clip_param = 0.1
         self.value_loss_coef = 0.5
+        self.entropy_coef = 0.01
 
     def update_target_model(self, target_model):
         self.target_model = copy.deepcopy(target_model)
@@ -306,11 +307,11 @@ class RglACTrainer(object):
                 inputs, values, _, actions, _ = data
                 self.optimizer.zero_grad()
                 outputs_val, outputs_mu, outputs_cov = self.model(inputs)                
-                action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_probs(actions)
+                action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)
                 values = values.to(self.device)
-                actions = actions.to(self.device).squeeze()
+
                 loss1 = self.criterion_val(outputs_val, values)
-                loss2 = -action_log_probs
+                loss2 = -action_log_probs.mean()
                 loss = loss1 + loss2
                 loss.backward()
                 self.optimizer.step()
@@ -334,6 +335,7 @@ class RglACTrainer(object):
         value_losses = 0
         policy_losses = 0
         entropy = 0
+        l2_losses = 0
         batch_count = 0
         for data in self.data_loader:
             inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
@@ -341,6 +343,7 @@ class RglACTrainer(object):
             outputs_vals, outputs_mu, outputs_cov = self.model(inputs)    
             dist = MultivariateNormal(outputs_mu, outputs_cov)
             action_log_probs = dist.log_prob(actions)
+            # TODO: check why entropy is negative
             dist_entropy = dist.entropy().mean() 
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
@@ -349,22 +352,31 @@ class RglACTrainer(object):
                                     1.0 + self.clip_param) * adv_targ
             loss1 = -torch.min(surr1, surr2).mean()
             loss2 = self.criterion_val(outputs_vals, values) * 0.5 * self.value_loss_coef
-            # TODO:
-            loss3 = dist_entropy * self.entropy_coef  # TODO: entropy_coef = 0.01
-            loss = loss1 + loss2 + loss3
+            loss3 = dist_entropy * self.entropy_coef
+
+            speed_square_diff = torch.sum(torch.pow(outputs_mu, 2), dim=1) - torch.Tensor([1]).to(self.device).double()
+            loss4 = torch.pow(torch.max(speed_square_diff, torch.Tensor([0]).to(self.device).double()), 2).mean() * 1
+            loss = loss1 + loss2 + loss3 + loss4
             loss.backward()
             self.optimizer.step()
+
             value_losses += loss2.data.item()
             policy_losses += loss1.data.item()
+            entropy += float(dist_entropy.cpu())
+            l2_losses += loss4.data.item()
             batch_count += 1
             if batch_count > num_batches:
                 break
 
         average_value_loss = value_losses / num_batches
         average_policy_loss = policy_losses / num_batches
+        average_entropy = entropy / num_batches
+        average_l2_loss = l2_losses / num_batches
         logging.info('Average value, policy loss : %.2E, %.2E', average_value_loss, average_policy_loss)
         self.writer.add_scalar('train/average_value_loss', average_value_loss, episode)
-        self.writer.add_scalar('train/average_value_loss', average_policy_loss, episode)
+        self.writer.add_scalar('train/average_policy_loss', average_policy_loss, episode)
+        self.writer.add_scalar('train/average_entropy', average_entropy, episode)
+        self.writer.add_scalar('train/average_l2_loss', average_l2_loss, episode)
 
         return average_value_loss
 
