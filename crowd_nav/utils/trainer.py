@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.distributions.distribution.Distribution import MultivariateNormal
 
 
 class MPRLTrainer(object):
@@ -306,10 +307,12 @@ class RglACTrainer(object):
                 inputs, values, _, actions, _ = data
                 self.optimizer.zero_grad()
                 outputs_val, outputs_act_feat = self.model(inputs)
+                mu, cov = convert_to_mean_and_cov(outputs_act_feat)
+                action_log_probs = MultivariateNormal(mu, cov).log_probs(actions)
                 values = values.to(self.device)
                 actions = actions.to(self.device).squeeze()
                 loss1 = self.criterion_val(outputs_val, values)
-                loss2 = self.criterion_pi(self.softmax(outputs_act_feat), actions)
+                loss2 = -action_log_probs
                 loss = loss1 + loss2
                 loss.backward()
                 self.optimizer.step()
@@ -338,7 +341,8 @@ class RglACTrainer(object):
             inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
             self.optimizer.zero_grad()
             outputs_vals, outputs_act_feats = self.model(inputs)
-            action_log_probs = FixedCategorical(logits=outputs_act_feats).log_probs(actions)
+            mu, cov = convert_to_mean_and_cov(outputs_act_feats)
+            action_log_probs = MultivariateNormal(mu, cov).log_prob(actions)
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
             surr1 = ratio * adv_targ
@@ -388,18 +392,10 @@ def pad_batch(batch):
     return states, values, rewards, next_states
 
 
-class FixedCategorical(torch.distributions.Categorical):
-    def sample(self):
-        return super().sample().unsqueeze(-1)
+def convert_to_mean_and_cov(action_feats): # action_feats: (batch, 5) 5->(mu_x, mu_y, s_x^2, s_y^2, s_xy)
+    mu = action_feats[:,:2]
+    cov = torch.cat((action_feats[:,2:3], action_feats[:,-1:], action_feats[:,-1:], action_feats[:,3:4]), dim=-1)\
+               .view(-1,2,2)
+    return mu, cov
 
-    def log_probs(self, actions):
-        return (
-            super()
-            .log_prob(actions.squeeze(-1))
-            .view(actions.size(0), -1)
-            .sum(-1)
-            .unsqueeze(-1)
-        )
 
-    def mode(self):
-        return self.probs.argmax(dim=-1, keepdim=True)
