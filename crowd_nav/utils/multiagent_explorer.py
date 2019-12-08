@@ -125,7 +125,7 @@ class MultiagentExplorer(object):
                 # TODO: try different strategies
                 for k in range(len(self.agents)):
                     # skip experience that doesn't lead to collision
-                    if any_collision and not isinstance(infos[k], Collision):
+                    if any_collision and isinstance(infos[k], Nothing):
                         continue
                     if imitation_learning:
                         self.update_memory(agent_states[k], agent_rewards[k], agent_actions[k],

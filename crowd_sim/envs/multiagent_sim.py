@@ -32,7 +32,7 @@ class MultiagentSim(gym.Env):
         self.time_limit = None
         self.time_step = None
         self.robot = None
-        self.humans = None
+        self.agents = None
         self.global_time = None
         self.robot_sensor_range = None
         # reward function
@@ -261,162 +261,44 @@ class MultiagentSim(gym.Env):
             ax.set_ylabel('y(m)', fontsize=16)
 
             # add human start positions and goals
-            human_colors = [cmap(i) for i in range(len(self.humans))]
-            for i in range(len(self.humans)):
-                human = self.humans[i]
-                human_goal = mlines.Line2D([human.get_goal_position()[0]], [human.get_goal_position()[1]],
-                                           color=human_colors[i],
+            agent_colors = [cmap(i) for i in range(len(self.agents))]
+            for i in range(len(self.agents)):
+                agent = self.agents[i]
+                ageng_goal = mlines.Line2D([agent.get_goal_position()[0]], [agent.get_goal_position()[1]],
+                                           color=agent_colors[i],
                                            marker='*', linestyle='None', markersize=15)
-                ax.add_artist(human_goal)
-                human_start = mlines.Line2D([human.get_start_position()[0]], [human.get_start_position()[1]],
-                                            color=human_colors[i],
+                ax.add_artist(ageng_goal)
+                agent_start = mlines.Line2D([agent.get_start_position()[0]], [agent.get_start_position()[1]],
+                                            color=agent_colors[i],
                                             marker='o', linestyle='None', markersize=15)
-                ax.add_artist(human_start)
+                ax.add_artist(agent_start)
 
-            robot_positions = [self.states[i][0].position for i in range(len(self.states))]
-            human_positions = [[self.states[i][1][j].position for j in range(len(self.humans))]
+            agent_positions = [[self.states[i][j].position for j in range(len(self.agents))]
                                for i in range(len(self.states))]
 
             for k in range(len(self.states)):
                 if k % 4 == 0 or k == len(self.states) - 1:
-                    robot = plt.Circle(robot_positions[k], self.robot.radius, fill=False, color=robot_color)
-                    humans = [plt.Circle(human_positions[k][i], self.humans[i].radius, fill=False, color=cmap(i))
-                              for i in range(len(self.humans))]
-                    ax.add_artist(robot)
-                    for human in humans:
-                        ax.add_artist(human)
+                    agents = [plt.Circle(agent_positions[k][i], self.agents[i].radius, fill=False, color=cmap(i))
+                              for i in range(len(self.agents))]
+                    for agent in agents:
+                        ax.add_artist(agent)
 
                 # add time annotation
                 global_time = k * self.time_step
                 if global_time % 4 == 0 or k == len(self.states) - 1:
-                    agents = humans + [robot]
                     times = [plt.text(agents[i].center[0] - x_offset, agents[i].center[1] - y_offset,
                                       '{:.1f}'.format(global_time),
-                                      color='black', fontsize=14) for i in range(self.human_num + 1)]
+                                      color='black', fontsize=14) for i in range(self.human_num)]
                     for time in times:
                        ax.add_artist(time)
                 if k != 0:
-                    nav_direction = plt.Line2D((self.states[k - 1][0].px, self.states[k][0].px),
-                                               (self.states[k - 1][0].py, self.states[k][0].py),
-                                               color=robot_color, ls='solid')
-                    human_directions = [plt.Line2D((self.states[k - 1][1][i].px, self.states[k][1][i].px),
-                                                   (self.states[k - 1][1][i].py, self.states[k][1][i].py),
+                    agent_directions = [plt.Line2D((self.states[k - 1][i].px, self.states[k][i].px),
+                                                   (self.states[k - 1][i].py, self.states[k][i].py),
                                                    color=cmap(i), ls='solid')
                                         for i in range(self.human_num)]
-                    ax.add_artist(nav_direction)
-                    for human_direction in human_directions:
-                        ax.add_artist(human_direction)
-            plt.legend([robot], ['Robot'], fontsize=16)
+                    for agent_direction in agent_directions:
+                        ax.add_artist(agent_direction)
             plt.show()
-
-            fig, ax = plt.subplots(figsize=(7, 7))
-            ax.tick_params(labelsize=12)
-            plot_scale = 1.2
-            ax.set_xlim(-self.panel_width * plot_scale / (2 * self.panel_scale),
-                        self.panel_width * plot_scale / (2 * self.panel_scale))
-            ax.set_ylim(-self.panel_height * plot_scale / (2 * self.panel_scale),
-                        self.panel_height * plot_scale / (2 * self.panel_scale))
-            ax.set_xlabel('x(m)', fontsize=14)
-            ax.set_ylabel('y(m)', fontsize=14)
-            plot_human_radius = 0.3
-            plot_robot_radius = 0.3
-            human_positions = [[state[1][j].position for j in range(len(state[1]))] for state in self.states]
-            human_ids = [[state[2][j] for j in range(len(state[2]))] for state in self.states]
-
-            human_colors = [cmap(i) for i in range(len(self.human_starts))]
-
-            for h in range(len(self.human_starts)):
-                human_start = mlines.Line2D([self.human_starts[h][0]], [self.human_starts[h][1]], color='b', marker='o',
-                                            linestyle='None', markersize=4)
-                human_goal = mlines.Line2D([self.human_goals[h][0]], [self.human_goals[h][1]], color='r', marker='*',
-                                           linestyle='None', markersize=4)
-
-                ax.add_artist(human_start)
-                ax.add_artist(human_goal)
-
-            # add robot start position
-            robot_start = mlines.Line2D([self.robot.get_start_position()[0]], [self.robot.get_start_position()[1]],
-                                        color=robot_color,
-                                        marker='o', linestyle='None', markersize=8)
-            ax.add_artist(robot_start)
-            # add robot and its goal
-            robot_positions = [state[0].position for state in self.states]
-            goal = mlines.Line2D([self.robot.get_goal_position()[0]], [self.robot.get_goal_position()[1]],
-                                 color=robot_color, marker='*', linestyle='None',
-                                 markersize=15, label='Goal')
-            robot = plt.Circle(robot_positions[0], plot_robot_radius, fill=False, color=robot_color)
-            # sensor_range = plt.Circle(robot_positions[0], self.robot_sensor_range, fill=False, ls='dashed')
-            ax.add_artist(robot)
-            ax.add_artist(goal)
-            # plt.legend([robot, goal], ['Robot', 'Goal'], fontsize=14)
-
-            # add humans and their numbers
-            # Sha: here humans refer to the humans in the first frame
-            humans = [plt.Circle(human_positions[0][i], plot_human_radius, fill=False, color='r')
-                      for i in range(self.dynamic_human_num[0])]
-            # disable showing human numbers
-            if display_numbers:
-                human_numbers = [
-                    plt.text(humans[i].center[0] - x_offset, humans[i].center[1] + y_offset, str(human_ids[0][i]),
-                             color='black') for i in range(self.dynamic_human_num[0])]
-            for i, human in enumerate(humans):
-                ax.add_artist(human)
-                if display_numbers:
-                    ax.add_artist(human_numbers[i])
-
-            # add time annotation
-            time = plt.text(0.1, 0.9, 'Time: {}'.format(0), fontsize=16, transform=ax.transAxes)
-            ax.add_artist(time)
-
-            # add human counter
-            count_human = plt.text(0.6, 0.9, 'Count Human: {}'.format(0), fontsize=16, transform=ax.transAxes)
-            ax.add_artist(count_human)
-
-            # add reward displayer
-            reward_displayer = plt.text(0.9, 1, 'r(s,a) is {}'.format(0), fontsize=16, transform=ax.transAxes)
-            ax.add_artist(reward_displayer)
-
-            # add robot velocity displayer
-            robot_velocity = plt.text(0.1, 1, 'v:{}, vx:{}, vy:{}'.format(0, 0, 0), fontsize=16, transform=ax.transAxes)
-            ax.add_artist(robot_velocity)
-
-            # visualize attention scores
-            # if hasattr(self.robot.policy, 'get_attention_weights'):
-            #     attention_scores = [
-            #         plt.text(-5.5, 5 - 0.5 * i, 'Human {}: {:.2f}'.format(i + 1, self.attention_weights[0][i]),
-            #                  fontsize=16) for i in range(len(self.humans))]
-
-            # compute orientation in each step and use arrow to show the direction
-            radius = plot_robot_radius
-            orientations = []
-            # sha: deal with the dynamic human number issue:
-            time_step = 0
-            for state in self.states:
-                orientation = []
-                for i in range(self.dynamic_human_num[time_step] + 1):
-                    agent_state = state[0] if i == 0 else state[1][i - 1]
-                    if self.robot.kinematics == 'unicycle' and i == 0:
-                        direction = (
-                            (agent_state.px, agent_state.py), (agent_state.px + radius * np.cos(agent_state.theta),
-                                                               agent_state.py + radius * np.sin(agent_state.theta)))
-                    else:
-                        theta = np.arctan2(agent_state.vy, agent_state.vx)
-                        direction = ((agent_state.px, agent_state.py), (agent_state.px + radius * np.cos(theta),
-                                                                        agent_state.py + radius * np.sin(theta)))
-                    orientation.append(direction)
-                    if time_step == 0:
-                        if i == 0:
-                            arrow_color = 'black'
-                            arrows = [
-                                patches.FancyArrowPatch(*orientation[i], color=arrow_color, arrowstyle=arrow_style)]
-                        else:
-                            arrows.extend([patches.FancyArrowPatch(*orientation[i])])
-                time_step += 1
-                orientations.append(orientation)
-
-            for arrow in arrows:
-                ax.add_artist(arrow)
-            global_step = 0
 
         elif mode == 'video':
             fig, ax = plt.subplots(figsize=(7, 7))

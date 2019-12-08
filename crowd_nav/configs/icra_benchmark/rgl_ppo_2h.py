@@ -4,6 +4,7 @@ from crowd_nav.configs.icra_benchmark.config import BaseEnvConfig, BasePolicyCon
 class EnvConfig(BaseEnvConfig):
     def __init__(self, debug=False):
         super(EnvConfig, self).__init__(debug)
+        self.sim.human_num = 2
 
 
 class PolicyConfig(BasePolicyConfig):
