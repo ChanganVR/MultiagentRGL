@@ -1,6 +1,7 @@
 import logging
 import random
 import math
+from itertools import product
 
 import gym
 import matplotlib.lines as mlines
@@ -179,14 +180,16 @@ class MultiagentSim(gym.Env):
     def step(self, actions):
         # collision detection between all agents
         num_agent = len(self.agents)
-        collision = False
-        for i in range(num_agent):
-            for j in range(i + 1, num_agent):
-                dx = self.agents[i].px - self.agents[j].px
-                dy = self.agents[i].py - self.agents[j].py
-                dist = (dx ** 2 + dy ** 2) ** (1 / 2) - self.agents[i].radius - self.agents[j].radius
-                if dist < 0:
-                    collision = True
+        collisions = [False] * num_agent
+        for i, j in product(range(num_agent), range(num_agent)):
+            if i == j:
+                continue
+            dx = self.agents[i].px - self.agents[j].px
+            dy = self.agents[i].py - self.agents[j].py
+            dist = (dx ** 2 + dy ** 2) ** (1 / 2) - self.agents[i].radius - self.agents[j].radius
+            if dist < 0:
+                collisions[i] = True
+                collisions[j] = True
 
         # check if all agents reach goals
         reaching_goals = list()
@@ -196,22 +199,26 @@ class MultiagentSim(gym.Env):
             reaching_goal = norm(end_position - np.array(agent.get_goal_position())) < agent.radius
             reaching_goals.append(reaching_goal)
 
-        if self.global_time >= self.time_limit - 1:
-            reward = 0
-            done = True
-            info = Timeout()
-        elif collision:
-            reward = self.collision_penalty
-            done = True
-            info = Collision()
-        elif all(reaching_goals):
-            reward = self.success_reward
-            done = True
-            info = ReachGoal()
-        else:
-            reward = 0
-            done = False
-            info = Nothing()
+        rewards = np.zeros(num_agent)
+        dones = np.zeros(num_agent)
+        infos = [None] * num_agent
+        for i in range(num_agent):
+            if self.global_time >= self.time_limit - 1:
+                rewards[i] = 0
+                dones[i] = True
+                infos[i] = Timeout()
+            elif collisions[i]:
+                rewards[i] = self.collision_penalty
+                dones[i] = True
+                infos[i] = Collision()
+            elif reaching_goals[i]:
+                rewards[i] = self.success_reward
+                dones[i] = True
+                infos[i] = ReachGoal()
+            else:
+                rewards[i] = 0
+                dones[i] = False
+                infos[i] = Nothing()
 
         # update all agents
         for i, action in enumerate(actions):
@@ -221,7 +228,7 @@ class MultiagentSim(gym.Env):
         self.global_time += self.time_step
         obs = self.compute_observations()
 
-        return obs, reward, done, info
+        return obs, rewards, dones, infos
 
     def compute_observations(self):
         obs = list()

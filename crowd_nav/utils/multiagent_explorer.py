@@ -7,6 +7,7 @@ import numpy as np
 from tqdm import tqdm
 
 from crowd_sim.envs.utils.info import *
+from crowd_sim.envs.utils.action import ActionXY
 
 
 class MultiagentExplorer(object):
@@ -31,10 +32,10 @@ class MultiagentExplorer(object):
         success_times = []
         collision_times = []
         timeout_times = []
-        success = 0
-        collision = 0
-        timeout = 0
-        discomfort = 0
+        stats = {'success': 0,
+                 'collision': 0,
+                 'timeout': 0,
+                 'discomfort': 0}
         min_dist = []
         cumulative_rewards = []
         average_returns = []
@@ -48,76 +49,110 @@ class MultiagentExplorer(object):
 
         for i in range(num_episode):
             obs = self.env.reset(phase)
-            done = False
+            episode_done = False
             agent_states = [[] for _ in range(len(self.agents))]
             agent_values = [[] for _ in range(len(self.agents))]
             agent_actions = [[] for _ in range(len(self.agents))]
+            agent_rewards = [[] for _ in range(len(self.agents))]
             agent_action_log_probs = [[] for _ in range(len(self.agents))]
-            rewards = []
-            while not done:
+            past_successes = np.zeros(len(self.agents)).astype(np.bool)
+            past_success_time = np.zeros(len(self.agents)) + self.env.time_limit
+            while not episode_done:
                 # TODO: ORCA as policy in test
                 if imitation_learning:
                     with torch.no_grad():
-                        action_to_take = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
+                        actions_to_take = [agent.act(ob) for agent, ob in zip(self.agents, obs)]
                     for k in range(len(self.agents)):
-                        agent_actions[k].append(action_to_take[k])
+                        agent_actions[k].append(actions_to_take[k])
                 else: #for ppo
-                    action_to_take = []
+                    actions_to_take = []
                     for k, (agent, ob) in enumerate(zip(self.agents, obs)):
-                        with torch.no_grad():
-                            value, action, action_log_probs, _action_to_take = agent.act(ob)
-                        agent_values[k].append(value[0].item())
-                        agent_actions[k].append(action)
-                        agent_action_log_probs[k].append(action_log_probs)
-                        action_to_take.append(_action_to_take)
-                        
-                obs, reward, done, info = self.env.step(action_to_take)
+                        if not past_successes[k]:
+                            with torch.no_grad():
+                                value, action, action_log_probs, _action_to_take = agent.act(ob)
+                            agent_values[k].append(value[0].item())
+                            agent_actions[k].append(action)
+                            agent_action_log_probs[k].append(action_log_probs)
+                            actions_to_take.append(_action_to_take)
+                        else:
+                            actions_to_take.append(ActionXY(0, 0))
+
+                obs, rewards, dones, infos = self.env.step(actions_to_take)
                 for k in range(len(self.agents)):
-                    agent_states[k].append(self.agents[k].last_state)
+                    if not past_successes[k]:
+                        agent_states[k].append(self.agents[k].last_state)
+                        agent_rewards[k].append(rewards[k])
 
-                rewards.append(reward)
+                # episodes terminate
+                timeout = any([isinstance(info, Timeout) for info in infos])
+                all_success = all([isinstance(info, ReachGoal) for info in infos])
+                any_collision = any([isinstance(info, Collision) for info in infos])
+                if timeout or all_success or any_collision:
+                    episode_done = True
 
-                if isinstance(info, Discomfort):
-                    discomfort += 1
-                    min_dist.append(info.min_dist)
+                current_successes = [isinstance(info, ReachGoal) for info in infos]
+                for k in range(len(self.agents)):
+                    if current_successes[k] and not past_successes[k]:
+                        past_success_time[k] = self.env.global_time
+                past_successes = np.bitwise_or(past_successes, np.array(current_successes))
 
-            if isinstance(info, ReachGoal):
-                success += 1
-                success_times.append(self.env.global_time)
-            elif isinstance(info, Collision):
-                collision += 1
+            stats['success'] += np.average(past_successes)
+            success_times.append(np.average([past_success_time[k] if past_successes[k] else 0
+                                             for k in range(len(self.agents))]))
+
+            stats['collision'] += np.average([isinstance(info, Collision) for info in infos])
+            if any_collision:
                 collision_cases.append(i)
-                collision_times.append(self.env.global_time)
-            elif isinstance(info, Timeout):
-                timeout += 1
-                timeout_cases.append(i)
-                timeout_times.append(self.env.time_limit)
-            else:
-                raise ValueError('Invalid end signal from environment')
+
+            stats['timeout'] += np.average([isinstance(info, Timeout) for info in infos])
+            timeout_cases.append(i)
+            timeout_times.append(self.env.time_limit)
+            # if isinstance(info, ReachGoal):
+            #     success += 1
+            #     success_times.append(self.env.global_time)
+            # elif isinstance(info, Collision):
+            #     collision += 1
+            #     collision_cases.append(i)
+            #     collision_times.append(self.env.global_time)
+            # elif isinstance(info, Timeout):
+            #     timeout += 1
+            #     timeout_cases.append(i)
+            #     timeout_times.append(self.env.time_limit)
+            # else:
+            #     raise ValueError('Invalid end signal from environment')
 
             if update_memory:
-                if isinstance(info, ReachGoal) or isinstance(info, Collision) or isinstance(info, Timeout):
-                    # only add positive(success) or negative(collision) experience in experience set
-                    for k in range(len(self.agents)):
-                        if imitation_learning:
-                            self.update_memory(agent_states[k], rewards, agent_actions[k], imitation_learning=imitation_learning)
-                        else:
-                            self.update_memory(agent_states[k], rewards, agent_actions[k], agent_values[k], agent_action_log_probs[k])
+                # TODO: try different strategies
+                for k in range(len(self.agents)):
+                    # skip experience that doesn't lead to collision
+                    if any_collision and not isinstance(infos[k], Collision):
+                        continue
+                    if imitation_learning:
+                        self.update_memory(agent_states[k], agent_rewards[k], agent_actions[k],
+                                           imitation_learning=imitation_learning)
+                    else:
+                        self.update_memory(agent_states[k], agent_rewards[k], agent_actions[k],
+                                           agent_values[k], agent_action_log_probs[k])
 
-            cumulative_rewards.append(sum([pow(self.gamma, t * self.time_step * self.v_pref)
-                                           * reward for t, reward in enumerate(rewards)]))
-            returns = []
-            for step in range(len(rewards)):
-                step_return = sum([pow(self.gamma, t * self.time_step * self.v_pref)
-                                   * reward for t, reward in enumerate(rewards[step:])])
-                returns.append(step_return)
-            average_returns.append(average(returns))
+            agent_cumulative_rewards = list()
+            agent_average_returns = list()
+            for k in range(len(self.agents)):
+                agent_cumulative_rewards.append(sum([pow(self.gamma, t * self.time_step * self.v_pref)
+                                                * reward for t, reward in enumerate(agent_rewards[k])]))
+                returns = []
+                for step in range(len(agent_rewards)):
+                    step_return = sum([pow(self.gamma, t * self.time_step * self.v_pref)
+                                       * reward for t, reward in enumerate(agent_rewards[k][step:])])
+                    returns.append(step_return)
+                agent_average_returns.append(average(returns))
+            cumulative_rewards.append(np.average(agent_cumulative_rewards))
+            average_returns.append(np.average(agent_average_returns))
 
             if pbar:
                 pbar.update(1)
-        success_rate = success / num_episode
-        collision_rate = collision / num_episode
-        assert success + collision + timeout == num_episode
+        success_rate = stats['success'] / num_episode
+        collision_rate = stats['collision'] / num_episode
+        # assert stats['success'] + stats['collision'] + stats['timeout'] == num_episode
         avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.time_limit
 
         extra_info = '' if episode is None else 'in episode {} '.format(episode)
@@ -129,7 +164,7 @@ class MultiagentExplorer(object):
         if phase in ['val', 'test']:
             total_time = sum(success_times + collision_times + timeout_times)
             logging.info('Frequency of being in danger: %.2f and average min separate distance in danger: %.2f',
-                         discomfort / total_time, average(min_dist))
+                         stats['discomfort'] / total_time, average(min_dist))
 
         if print_failure:
             logging.info('Collision cases: ' + ' '.join([str(x) for x in collision_cases]))

@@ -79,13 +79,7 @@ def main(args):
     policy.set_device(device)
 
     if args.visualize:
-        rewards = []
-        obs = env.reset(args.phase, args.test_case)
-        done = False
-        while not done:
-            actions = [agent.act(ob)[3] for agent, ob in zip(agents, obs)]
-            obs, reward, done, info = env.step(actions)
-            rewards.append(reward)
+        explorer.run_episodes(1, args.phase)
         if args.traj:
             env.render('traj', args.video_file)
         else:
