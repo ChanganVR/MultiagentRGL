@@ -312,13 +312,15 @@ class RglACTrainer(object):
                 outputs_val, alpha_beta_1, alpha_beta_2 = self.model(inputs)
                 vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
                 vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
-                actions = torch.cat([vx_dist.sample().unsqueeze(1), vy_dist.sample().unsqueeze(1)], dim=1)
-                action_log_probs = vx_dist.log_prob(actions[:, :1]) + vy_dist.log_prob(actions[:, 1:])
+                action_log_probs = vx_dist.log_prob(actions[:, 0]).unsqueeze(1) +\
+                                   vy_dist.log_prob(actions[:, 1]).unsqueeze(1)
 
                 values = values.to(self.device)
+                # dist_entropy = vx_dist.entropy().mean() + vy_dist.entropy().mean()
 
                 loss1 = self.criterion_val(outputs_val, values)
                 loss2 = -action_log_probs.mean()
+                # loss = loss1 + loss2 - dist_entropy * self.entropy_coef
                 loss = loss1 + loss2
                 loss.backward()
                 self.optimizer.step()
@@ -353,13 +355,13 @@ class RglACTrainer(object):
             outputs_vals, alpha_beta_1, alpha_beta_2 = self.model(inputs)
             vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
             vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
-            actions = torch.cat([vx_dist.sample().unsqueeze(1), vy_dist.sample().unsqueeze(1)], dim=1)
-            action_log_probs = vx_dist.log_prob(actions[:, :1]) + vy_dist.log_prob(actions[:, 1:])
+            action_log_probs = vx_dist.log_prob(actions[:, 0]).unsqueeze(1) + vy_dist.log_prob(actions[:, 1]).unsqueeze(1)
 
             # TODO: check why entropy is negative
             dist_entropy = vx_dist.entropy().mean() + vy_dist.entropy().mean()
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
+            assert ratio.shape[1] == 1
             surr1 = ratio * adv_targ
             surr2 = torch.clamp(ratio, 1.0 - self.clip_param,
                                     1.0 + self.clip_param) * adv_targ
@@ -374,8 +376,8 @@ class RglACTrainer(object):
             loss.backward()
             self.optimizer.step()
 
-            value_losses += loss2.data.item()
             policy_losses += loss1.data.item()
+            value_losses += loss2.data.item()
             entropy += float(dist_entropy.cpu())
             # l2_losses += loss4.data.item()
             batch_count += 1

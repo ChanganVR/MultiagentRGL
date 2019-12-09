@@ -185,10 +185,14 @@ class MultiagentExplorer(object):
         gae = 0
         returns_list = []
 
+        if imitation_learning:
+            actions = [((action[0] + 1) / 2, (action[1] + 1) / 2) for action in actions]
+
         tmp_tuples = list()
         for i, state in reversed(list(enumerate(states))):
             # VALUE UPDATE
             if imitation_learning:
+
                 # define the value of states in IL as cumulative discounted rewards, which is the same in RL
                 state = self.target_policy.transform(state)
                 # next_state = self.target_policy.transform(states[i+1])

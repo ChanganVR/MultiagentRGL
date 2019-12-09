@@ -219,13 +219,13 @@ class MultiagentSim(gym.Env):
                 dones[i] = True
                 infos[i] = ReachGoal()
             else:
-                # rewards[i] = 0
+                rewards[i] = 0
 
-                scale = 0.1
-                current_distance_to_goal = self.agents[i].get_distance_to_goal()
-                advancement = self.last_distance_to_goal[i] - current_distance_to_goal
-                rewards[i] = advancement * scale
-                self.last_distance_to_goal[i] = current_distance_to_goal
+                # scale = 0.1
+                # current_distance_to_goal = self.agents[i].get_distance_to_goal()
+                # advancement = self.last_distance_to_goal[i] - current_distance_to_goal
+                # rewards[i] = advancement * scale
+                # self.last_distance_to_goal[i] = current_distance_to_goal
 
                 dones[i] = False
                 infos[i] = Nothing()

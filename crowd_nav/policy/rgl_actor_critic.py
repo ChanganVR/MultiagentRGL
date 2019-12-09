@@ -116,8 +116,8 @@ class RglActorCritic(Policy):
         vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
         vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
         actions = torch.cat([vx_dist.sample().unsqueeze(1), vy_dist.sample().unsqueeze(1)], dim=1)
-        action_log_probs = vx_dist.log_prob(actions[:, :1]) + vy_dist.log_prob(actions[:, 1:])
-        action_to_take = [ActionXY(action[0], action[1]) for action in actions.cpu().numpy()]
+        action_log_probs = vx_dist.log_prob(actions[:, 0]).unsqueeze(1) + vy_dist.log_prob(actions[:, 1]).unsqueeze(1)
+        action_to_take = [ActionXY(action[0]*2-1, action[1]*2-1) for action in actions.cpu().numpy()]
         
         return value, actions, action_log_probs, action_to_take
     
