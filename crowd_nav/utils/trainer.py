@@ -307,21 +307,23 @@ class RglACTrainer(object):
             for data in self.data_loader:
                 inputs, values, _, actions = data
                 self.optimizer.zero_grad()
-                # outputs_val, outputs_mu, outputs_cov = self.model(inputs)
+                # # outputs_val, outputs_mu, outputs_cov = self.model(inputs)
                 # action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)
                 outputs_val, alpha_beta_1, alpha_beta_2 = self.model(inputs)
                 vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
                 vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
-                action_log_probs = vx_dist.log_prob(actions[:, 0]).unsqueeze(1) +\
-                                   vy_dist.log_prob(actions[:, 1]).unsqueeze(1)
+                p = torch.Tensor([1 + 1e-6]).to(self.device)
+                q = torch.Tensor([1e-8]).to(self.device)
+                action_log_probs = (vx_dist.log_prob(actions[:, 0] / p + q)).unsqueeze(1) +\
+                                    (vy_dist.log_prob(actions[:, 1] / p + q)).unsqueeze(1)
 
                 values = values.to(self.device)
-                # dist_entropy = vx_dist.entropy().mean() + vy_dist.entropy().mean()
+                dist_entropy = vx_dist.entropy().mean() + vy_dist.entropy().mean()
 
                 loss1 = self.criterion_val(outputs_val, values)
                 loss2 = -action_log_probs.mean()
-                # loss = loss1 + loss2 - dist_entropy * self.entropy_coef
-                loss = loss1 + loss2
+                loss = loss1 + loss2 - dist_entropy * self.entropy_coef
+                # loss = loss1 + loss2
                 loss.backward()
                 self.optimizer.step()
                 value_loss += loss1.data.item()
