@@ -16,7 +16,7 @@ class ValueActionPredictor(nn.Module):
 
         self.value_network = mlp(config.gcn.X_dim, config.rgl_ppo.value_network_dims)
         self.action_network = mlp(config.gcn.X_dim, config.rgl_ppo.value_network_dims[:-1] +
-                                  [5])
+                                  [4])
 
     def convert_to_mean_and_cov(self, action_feats):  # action_feats: (batch, 5) 5->(mu_x, mu_y, s_x^2, s_y^2, s_xy)
         delta = 1e-6
@@ -49,6 +49,8 @@ class ValueActionPredictor(nn.Module):
             state_embedding_act = self.graph_model_act(state)[:, 0, :]
             value = self.value_network(state_embedding_val)
             action_feat = self.action_network(state_embedding_act)
-        mu, cov = self.convert_to_mean_and_cov(action_feat)
+        # mu, cov = self.convert_to_mean_and_cov(action_feat)
+        alpha_beta_1 = torch.abs(action_feat[:, :2]) + torch.Tensor([1e-6]).to(value.device)
+        alpha_beta_2 = torch.abs(action_feat[:, 2:]) + torch.Tensor([1e-6]).to(value.device)
             
-        return value, mu, cov
+        return value, alpha_beta_1, alpha_beta_2

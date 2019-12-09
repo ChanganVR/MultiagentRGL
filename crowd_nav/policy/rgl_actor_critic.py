@@ -7,6 +7,7 @@ from crowd_sim.envs.utils.state import tensor_to_joint_state
 from crowd_sim.envs.utils.utils import point_to_segment_dist
 from crowd_nav.policy.value_action_predictor import ValueActionPredictor
 from torch.distributions.multivariate_normal import MultivariateNormal
+from torch.distributions.beta import Beta
 
 
 class RglActorCritic(Policy):
@@ -105,10 +106,17 @@ class RglActorCritic(Policy):
         self.load_state_dict(checkpoint)
 
     def act(self, state_tensor): # state is a batch of tensors rather than a joint state
-        value, mu, cov = self.value_action_predictor(state_tensor)
-        dist = MultivariateNormal(mu, cov)
-        actions = dist.sample()
-        action_log_probs = dist.log_prob(actions)
+        # value, mu, cov = self.value_action_predictor(state_tensor)
+        # dist = MultivariateNormal(mu, cov)
+        # actions = dist.sample()
+        # action_log_probs = dist.log_prob(actions)
+        # action_to_take = [ActionXY(action[0], action[1]) for action in actions.cpu().numpy()]
+
+        value, alpha_beta_1, alpha_beta_2 = self.value_action_predictor(state_tensor)
+        vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
+        vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
+        actions = torch.cat([vx_dist.sample().unsqueeze(1), vy_dist.sample().unsqueeze(1)], dim=1)
+        action_log_probs = vx_dist.log_prob(actions[:, :1]) + vy_dist.log_prob(actions[:, 1:])
         action_to_take = [ActionXY(action[0], action[1]) for action in actions.cpu().numpy()]
         
         return value, actions, action_log_probs, action_to_take
@@ -131,13 +139,6 @@ class RglActorCritic(Policy):
             self.last_state = self.transform(state)
             
         return value[0], action[0], action_log_probs[0], action_to_take[0]
-    
-    # def evaluate_actions(self, state_tensor, actions_tensor):
-    #     value, mu, cov = self.value_action_predictor(state_tensor)
-    #     dist = MultivariateNormal(mu, cov)
-    #     action_log_probs = dist.log_prob(actions_tensor)
-    #
-    #     return value, action_log_probs
 
     def transform(self, state):
         """

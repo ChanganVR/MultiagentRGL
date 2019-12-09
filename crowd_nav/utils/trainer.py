@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.distributions.multivariate_normal import MultivariateNormal
+from torch.distributions.beta import Beta
 
 
 class MPRLTrainer(object):
@@ -306,8 +307,14 @@ class RglACTrainer(object):
             for data in self.data_loader:
                 inputs, values, _, actions = data
                 self.optimizer.zero_grad()
-                outputs_val, outputs_mu, outputs_cov = self.model(inputs)                
-                action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)
+                # outputs_val, outputs_mu, outputs_cov = self.model(inputs)
+                # action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)
+                outputs_val, alpha_beta_1, alpha_beta_2 = self.model(inputs)
+                vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
+                vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
+                actions = torch.cat([vx_dist.sample().unsqueeze(1), vy_dist.sample().unsqueeze(1)], dim=1)
+                action_log_probs = vx_dist.log_prob(actions[:, :1]) + vy_dist.log_prob(actions[:, 1:])
+
                 values = values.to(self.device)
 
                 loss1 = self.criterion_val(outputs_val, values)
@@ -340,11 +347,17 @@ class RglACTrainer(object):
         for data in self.data_loader:
             inputs, values, rewards, actions, returns, old_action_log_probs, adv_targ = data
             self.optimizer.zero_grad()
-            outputs_vals, outputs_mu, outputs_cov = self.model(inputs)    
-            dist = MultivariateNormal(outputs_mu, outputs_cov)
-            action_log_probs = dist.log_prob(actions)
+            # outputs_vals, outputs_mu, outputs_cov = self.model(inputs)
+            # dist = MultivariateNormal(outputs_mu, outputs_cov)
+            # action_log_probs = dist.log_prob(actions)
+            outputs_vals, alpha_beta_1, alpha_beta_2 = self.model(inputs)
+            vx_dist = Beta(alpha_beta_1[:, 0], alpha_beta_1[:, 1])
+            vy_dist = Beta(alpha_beta_2[:, 0], alpha_beta_2[:, 1])
+            actions = torch.cat([vx_dist.sample().unsqueeze(1), vy_dist.sample().unsqueeze(1)], dim=1)
+            action_log_probs = vx_dist.log_prob(actions[:, :1]) + vy_dist.log_prob(actions[:, 1:])
+
             # TODO: check why entropy is negative
-            dist_entropy = dist.entropy().mean() 
+            dist_entropy = vx_dist.entropy().mean() + vy_dist.entropy().mean()
             
             ratio = torch.exp(action_log_probs - old_action_log_probs)
             surr1 = ratio * adv_targ
@@ -354,16 +367,17 @@ class RglACTrainer(object):
             loss2 = self.criterion_val(outputs_vals, values) * 0.5 * self.value_loss_coef
             loss3 = - dist_entropy * self.entropy_coef
 
-            speed_square_diff = torch.sum(torch.pow(outputs_mu, 2), dim=1) - torch.Tensor([1]).to(self.device).double()
-            loss4 = torch.pow(torch.max(speed_square_diff, torch.Tensor([0]).to(self.device).double()), 2).mean() * 1
-            loss = loss1 + loss2 + loss3 + loss4
+            # speed_square_diff = torch.sum(torch.pow(outputs_mu, 2), dim=1) - torch.Tensor([1]).to(self.device).double()
+            # loss4 = torch.pow(torch.max(speed_square_diff, torch.Tensor([0]).to(self.device).double()), 2).mean() * 1
+
+            loss = loss1 + loss2 + loss3
             loss.backward()
             self.optimizer.step()
 
             value_losses += loss2.data.item()
             policy_losses += loss1.data.item()
             entropy += float(dist_entropy.cpu())
-            l2_losses += loss4.data.item()
+            # l2_losses += loss4.data.item()
             batch_count += 1
             if batch_count > num_batches:
                 break
@@ -376,7 +390,7 @@ class RglACTrainer(object):
         self.writer.add_scalar('train/average_value_loss', average_value_loss, episode)
         self.writer.add_scalar('train/average_policy_loss', average_policy_loss, episode)
         self.writer.add_scalar('train/average_entropy', average_entropy, episode)
-        self.writer.add_scalar('train/average_l2_loss', average_l2_loss, episode)
+        # self.writer.add_scalar('train/average_l2_loss', average_l2_loss, episode)
 
         return average_value_loss
 
