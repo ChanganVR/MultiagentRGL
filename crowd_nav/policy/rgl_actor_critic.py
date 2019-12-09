@@ -5,7 +5,6 @@ from crowd_sim.envs.policy.policy import Policy
 from crowd_sim.envs.utils.action import ActionRot, ActionXY
 from crowd_sim.envs.utils.state import tensor_to_joint_state
 from crowd_sim.envs.utils.utils import point_to_segment_dist
-from crowd_nav.policy.graph_model import RGL
 from crowd_nav.policy.value_action_predictor import ValueActionPredictor
 from torch.distributions.multivariate_normal import MultivariateNormal
 
@@ -32,13 +31,19 @@ class RglActorCritic(Policy):
         self.v_pref = 1
         self.value_action_predictor = None
         self.traj = None
+        self.shared_gcn = None
 
     def configure(self, config):
         self.set_common_parameters(config)
-        graph_model = RGL(config, self.robot_state_dim, self.human_state_dim)
-        self.value_action_predictor = ValueActionPredictor(config, graph_model)
-        self.model = [graph_model, self.value_action_predictor.value_network, \
-                      self.value_action_predictor.action_network]
+        self.shared_gcn = True
+        self.value_action_predictor = ValueActionPredictor(config, self.robot_state_dim, self.human_state_dim,
+                                                           shared_gcn=self.shared_gcn)
+        if self.shared_gcn:
+            self.model = [self.value_action_predictor.graph_model, self.value_action_predictor.value_network,
+                          self.value_action_predictor.action_network]
+        else:
+            self.model = [self.value_action_predictor.graph_model_val, self.value_action_predictor.graph_model_act,
+                          self.value_action_predictor.value_network, self.value_action_predictor.action_network]
 
     def set_common_parameters(self, config):
         self.gamma = config.rl.gamma
@@ -66,17 +71,29 @@ class RglActorCritic(Policy):
         return self.value_action_predictor
 
     def get_state_dict(self):
-        return {
-            'graph_model': self.value_action_predictor.graph_model.state_dict(),
-            'value_network': self.value_action_predictor.value_network.state_dict(),
-            'action_network': self.value_action_predictor.action_network.state_dict()
-        }
+        if self.shared_gcn:
+            return {
+                'graph_model': self.value_action_predictor.graph_model.state_dict(),
+                'value_network': self.value_action_predictor.value_network.state_dict(),
+                'action_network': self.value_action_predictor.action_network.state_dict()
+            }
+        else:
+            return {
+                'graph_model_val': self.value_action_predictor.graph_model_val.state_dict(),
+                'graph_model_act': self.value_action_predictor.graph_model_act.state_dict(),
+                'value_network': self.value_action_predictor.value_network.state_dict(),
+                'action_network': self.value_action_predictor.action_network.state_dict()
+            }
 
     def get_traj(self):
         return self.traj
 
     def load_state_dict(self, state_dict):
-        self.value_action_predictor.graph_model.load_state_dict(state_dict['graph_model'])
+        if self.shared_gcn:
+            self.value_action_predictor.graph_model.load_state_dict(state_dict['graph_model'])
+        else:
+            self.value_action_predictor.graph_model_val.load_state_dict(state_dict['graph_model_val'])
+            self.value_action_predictor.graph_model_act.load_state_dict(state_dict['graph_model_act'])
         self.value_action_predictor.value_network.load_state_dict(state_dict['value_network'])
         self.value_action_predictor.action_network.load_state_dict(state_dict['action_network'])
 

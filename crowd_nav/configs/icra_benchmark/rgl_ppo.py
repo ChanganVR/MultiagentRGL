@@ -27,6 +27,15 @@ class TrainConfig(BaseTrainConfig):
     def __init__(self, debug=False):
         super(TrainConfig, self).__init__(debug)
 
+        self.imitation_learning.il_epochs = 100
         self.train.rl_train_epochs = 1
         self.train.rl_learning_rate = 2.5e-4
         self.train.train_episodes = 1e6
+
+        if debug:
+            self.imitation_learning.il_episodes = 10
+            self.imitation_learning.il_epochs = 5
+            self.train.train_episodes = 1
+            self.train.checkpoint_interval = self.train.train_episodes
+            self.train.evaluation_interval = 1
+            self.train.target_update_interval = 1

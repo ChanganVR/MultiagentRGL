@@ -1,18 +1,18 @@
 import torch
 import torch.nn as nn
 from crowd_nav.policy.helpers import mlp
+from crowd_nav.policy.graph_model import RGL
 
 
 class ValueActionPredictor(nn.Module):
-    def __init__(self, config, graph_model_val, graph_model_act=None, shared_gcn=True):
+    def __init__(self, config, robot_state_dim, human_state_dim, shared_gcn=True):
         super().__init__()
         self.shared_gcn = shared_gcn
         if shared_gcn:
-            self.graph_model = graph_model_val
+            self.graph_model = RGL(config, robot_state_dim, human_state_dim)
         else:
-            self.graph_model_val = graph_model_val
-            assert graph_model_act is not None, "void graph_model_act"
-            self.graph_model_act = graph_model_act
+            self.graph_model_val = RGL(config, robot_state_dim, human_state_dim)
+            self.graph_model_act = RGL(config, robot_state_dim, human_state_dim)
 
         self.value_network = mlp(config.gcn.X_dim, config.rgl_ppo.value_network_dims)
         self.action_network = mlp(config.gcn.X_dim, config.rgl_ppo.value_network_dims[:-1] +
