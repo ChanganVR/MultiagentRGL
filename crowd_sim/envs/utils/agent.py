@@ -93,6 +93,9 @@ class Agent(object):
     def get_start_position(self):
         return self.sx, self.sy
 
+    def get_distance_to_goal(self):
+        return norm(np.array(self.get_position()) - np.array(self.get_goal_position()))
+
     def get_velocity(self):
         return self.vx, self.vy
 

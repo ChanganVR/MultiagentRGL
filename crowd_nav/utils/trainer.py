@@ -352,7 +352,7 @@ class RglACTrainer(object):
                                     1.0 + self.clip_param) * adv_targ
             loss1 = -torch.min(surr1, surr2).mean()
             loss2 = self.criterion_val(outputs_vals, values) * 0.5 * self.value_loss_coef
-            loss3 = dist_entropy * self.entropy_coef
+            loss3 = - dist_entropy * self.entropy_coef
 
             speed_square_diff = torch.sum(torch.pow(outputs_mu, 2), dim=1) - torch.Tensor([1]).to(self.device).double()
             loss4 = torch.pow(torch.max(speed_square_diff, torch.Tensor([0]).to(self.device).double()), 2).mean() * 1

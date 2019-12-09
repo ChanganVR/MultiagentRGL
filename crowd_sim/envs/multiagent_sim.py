@@ -78,6 +78,7 @@ class MultiagentSim(gym.Env):
 
         self.num_agent = None
         self.agents = None
+        self.last_distance_to_goal = None
 
     def configure(self, config):
         self.config = config
@@ -166,9 +167,11 @@ class MultiagentSim(gym.Env):
         else:
             raise NotImplementedError
 
+        self.last_distance_to_goal = list()
         for agent in self.agents:
             agent.time_step = self.time_step
             agent.policy.time_step = self.time_step
+            self.last_distance_to_goal.append(agent.get_distance_to_goal())
 
         self.states = list()
 
@@ -216,7 +219,14 @@ class MultiagentSim(gym.Env):
                 dones[i] = True
                 infos[i] = ReachGoal()
             else:
-                rewards[i] = 0
+                # rewards[i] = 0
+
+                scale = 0.1
+                current_distance_to_goal = self.agents[i].get_distance_to_goal()
+                advancement = self.last_distance_to_goal[i] - current_distance_to_goal
+                rewards[i] = advancement * scale
+                self.last_distance_to_goal[i] = current_distance_to_goal
+
                 dones[i] = False
                 infos[i] = Nothing()
 
