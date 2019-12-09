@@ -152,6 +152,7 @@ class MultiagentExplorer(object):
                 pbar.update(1)
         success_rate = stats['success'] / num_episode
         collision_rate = stats['collision'] / num_episode
+        timeout_rate = stats['timeout'] / num_episode
         # assert stats['success'] + stats['collision'] + stats['timeout'] == num_episode
         avg_nav_time = sum(success_times) / len(success_times) if success_times else self.env.time_limit
 
@@ -170,11 +171,13 @@ class MultiagentExplorer(object):
             logging.info('Collision cases: ' + ' '.join([str(x) for x in collision_cases]))
             logging.info('Timeout cases: ' + ' '.join([str(x) for x in timeout_cases]))
 
-        self.statistics = success_rate, collision_rate, avg_nav_time, average(cumulative_rewards), average(average_returns)
+        self.statistics = success_rate, collision_rate, avg_nav_time, average(cumulative_rewards), \
+                          average(average_returns), timeout_rate
 
         return self.statistics
 
     def update_memory(self, states, rewards, actions, values=None, action_log_probs=None, imitation_learning=False):
+        assert len(states) == len(rewards)
         if self.memory is None or self.gamma is None:
             raise ValueError('Memory or gamma value is not set!')
         
@@ -183,35 +186,31 @@ class MultiagentExplorer(object):
         returns_list = []
 
         tmp_tuples = list()
-        for i, state in reversed(list(enumerate(states[:-1]))):
-            reward = rewards[i]
-           
+        for i, state in reversed(list(enumerate(states))):
             # VALUE UPDATE
             if imitation_learning:
                 # define the value of states in IL as cumulative discounted rewards, which is the same in RL
                 state = self.target_policy.transform(state)
-                next_state = self.target_policy.transform(states[i+1])
+                # next_state = self.target_policy.transform(states[i+1])
                 value = sum([pow(self.gamma, (t - i) * self.time_step * self.v_pref) * reward *
                              (1 if t >= i else 0) for t, reward in enumerate(rewards)])
 
                 action = torch.from_numpy(np.array(actions[i])).to(self.device)
                 value = torch.Tensor([value]).to(self.device)
                 reward = torch.Tensor([rewards[i]]).to(self.device)
-                tmp_tuples.append((state, value, reward, action, next_state))
+                tmp_tuples.append((state, value, reward, action))
             else:
-#                 next_state = states[i+1]
-#                 if i == len(states) - 1:
-#                     # terminal state
-#                     value = reward
-#                 else:
-#                     value = 0
-                delta = rewards[i] + _gamma * values[i + 1] - values[i]
+                if i == len(states) - 1:
+                    td_target = rewards[i]
+                else:
+                    td_target = rewards[i] + _gamma * values[i + 1]
+                delta = td_target - values[i]
                 gae = delta + _gamma * gae  # * gae_lambda
                 reward_to_go = gae + values[i] # i.e., return
                 returns_list.append(reward_to_go)
                 
                 reward_to_go = torch.Tensor([reward_to_go]).to(self.device)
-                value = torch.Tensor([values[i]]).to(self.device)
+                value = torch.Tensor([td_target]).to(self.device)
                 reward = torch.Tensor([rewards[i]]).to(self.device)
                 tmp_tuples.append((state, value, reward, actions[i], reward_to_go, action_log_probs[i]))
         
@@ -229,12 +228,13 @@ class MultiagentExplorer(object):
         #     self.memory.memory[i] = self.memory.memory[i] + (advantages[i],)
 
     def log(self, tag_prefix, global_step):
-        sr, cr, time, reward, avg_return = self.statistics
+        sr, cr, time, reward, avg_return, timeout = self.statistics
         self.writer.add_scalar(tag_prefix + '/success_rate', sr, global_step)
         self.writer.add_scalar(tag_prefix + '/collision_rate', cr, global_step)
         self.writer.add_scalar(tag_prefix + '/time', time, global_step)
         self.writer.add_scalar(tag_prefix + '/reward', reward, global_step)
         self.writer.add_scalar(tag_prefix + '/avg_return', avg_return, global_step)
+        self.writer.add_scalar(tag_prefix + '/timeout', timeout, global_step)
 
 
 def average(input_list):

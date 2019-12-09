@@ -27,7 +27,7 @@ class TrainConfig(BaseTrainConfig):
     def __init__(self, debug=False):
         super(TrainConfig, self).__init__(debug)
 
-        self.imitation_learning.il_epochs = 100
+        self.imitation_learning.il_epochs = 50
         self.train.rl_train_epochs = 1
         self.train.rl_learning_rate = 2.5e-4
         self.train.train_episodes = 1e6

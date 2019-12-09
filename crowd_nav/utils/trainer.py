@@ -304,7 +304,7 @@ class RglACTrainer(object):
             policy_loss = 0
             logging.debug('{}-th epoch starts'.format(epoch))
             for data in self.data_loader:
-                inputs, values, _, actions, _ = data
+                inputs, values, _, actions = data
                 self.optimizer.zero_grad()
                 outputs_val, outputs_mu, outputs_cov = self.model(inputs)                
                 action_log_probs = MultivariateNormal(outputs_mu, outputs_cov).log_prob(actions)

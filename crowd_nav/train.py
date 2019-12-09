@@ -189,7 +189,7 @@ def main(args):
             trainer.update_target_model(model)
         # evaluate the model
         if episode % evaluation_interval == 0:
-            _, _, _, reward, _ = explorer.run_episodes(val_size, 'val', episode=episode)
+            _, _, _, reward, _, _ = explorer.run_episodes(val_size, 'val', episode=episode)
             explorer.log('val', episode // evaluation_interval)
 
             if episode % checkpoint_interval == 0 and reward > best_val_reward:

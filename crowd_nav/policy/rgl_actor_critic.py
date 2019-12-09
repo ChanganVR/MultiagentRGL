@@ -35,7 +35,7 @@ class RglActorCritic(Policy):
 
     def configure(self, config):
         self.set_common_parameters(config)
-        self.shared_gcn = True
+        self.shared_gcn = False
         self.value_action_predictor = ValueActionPredictor(config, self.robot_state_dim, self.human_state_dim,
                                                            shared_gcn=self.shared_gcn)
         if self.shared_gcn:
